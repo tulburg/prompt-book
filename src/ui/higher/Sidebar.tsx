@@ -1,8 +1,6 @@
 export function Sidebar({ className }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={`flex bg-panel w-[320px] border-r border-border-500 p-10 ${className}`}
-    >
+    <div className={`flex flex-col bg-panel p-10 h-full ${className ?? ""}`}>
       Sidebar
     </div>
   );

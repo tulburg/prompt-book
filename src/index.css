@@ -77,6 +77,30 @@
   }
 }
 
+/* Resize handle styles for react-resizable-panels */
+.resize-handle {
+  width: 2px;
+  min-width: 2px;
+  background: transparent;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  cursor: col-resize;
+}
+.resize-handle:focus-visible {
+  outline: none;
+}
+.resize-handle[data-separator]:not([data-separator="inactive"]):not(
+    [data-separator="disabled"]
+  ) {
+  background-color: var(--color-sky-700);
+  /* border-left-color: oklch(0.5 0.02 250 / 0.6); */
+  /* border-right-color: oklch(0.5 0.02 250 / 0.6); */
+  cursor: col-resize;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --color-background: 224 71.4% 4.1%;

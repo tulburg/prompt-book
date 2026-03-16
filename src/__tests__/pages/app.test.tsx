@@ -1,5 +1,5 @@
 import App from "@/app";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 describe("app page", () => {
@@ -7,19 +7,16 @@ describe("app page", () => {
 		render(<App />);
 	};
 
-	it("should render app page", () => {
+	it("should render app page with FrameHost layout", () => {
 		setup();
-		expect(
-			screen.getByText("Build modern apps with Electron and React!"),
-		).toBeDefined();
+		expect(screen.getByText("Sidebar")).toBeDefined();
+		expect(screen.getByText("Explorer")).toBeDefined();
+		expect(screen.getByText("Outline")).toBeDefined();
+		expect(screen.getByText("Properties")).toBeDefined();
 	});
 
-	it("should change phrase when button is clicked", () => {
+	it("should render resizable panel group", () => {
 		setup();
-		const button = screen.getByTestId("random-button");
-		fireEvent.click(button);
-		expect(
-			screen.getByText("Create high-quality desktop apps fast."),
-		).toBeDefined();
+		expect(screen.getByTestId("main-layout")).toBeDefined();
 	});
 });

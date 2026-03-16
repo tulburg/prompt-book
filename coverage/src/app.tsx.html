@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>7/7</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">50% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>1/2</span>
+                <span class='fraction'>0/0</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>2/2</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>7/7</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
@@ -130,13 +130,7 @@
 <a name='L65'></a><a href='#L65'>65</a>
 <a name='L66'></a><a href='#L66'>66</a>
 <a name='L67'></a><a href='#L67'>67</a>
-<a name='L68'></a><a href='#L68'>68</a>
-<a name='L69'></a><a href='#L69'>69</a>
-<a name='L70'></a><a href='#L70'>70</a>
-<a name='L71'></a><a href='#L71'>71</a>
-<a name='L72'></a><a href='#L72'>72</a>
-<a name='L73'></a><a href='#L73'>73</a>
-<a name='L74'></a><a href='#L74'>74</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L68'></a><a href='#L68'>68</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -147,24 +141,18 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -209,76 +197,70 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import BiomeLogo from "@/assets/biome-logo.svg";
-import ElectronLogo from "@/assets/electron-logo.svg";
-import ReactLogo from "@/assets/react-logo.svg";
-import ReactTestingLibraryLogo from "@/assets/react-testing-library-logo.png";
-import ShadcnLogo from "@/assets/shadcn-logo.png";
-import TailwindCSSLogo from "@/assets/tailwind-css-logo.svg";
-import ViteLogo from "@/assets/vite-logo.svg";
-import VitestLogo from "@/assets/vitest-logo.svg";
-import { Button } from "@/components/button";
-import { useState } from "react";
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import {
+	Canvas,
+	ExplorerPanel,
+	FrameHost,
+	OutlinePanel,
+	PropertiesPanel,
+	Sidebar,
+	WindowFrame,
+} from "@/ui";
+import PromptBox from "./components/PromptBox";
+&nbsp;
 export default function App() {
-	const introductionPhrases = [
-		"Build modern apps with Electron and React!",
-		"Create high-quality desktop apps fast.",
-		"Boost your productivity with modern web tools.",
-	];
-&nbsp;
-	const [phrase, setPhrase] = useState(introductionPhrases[0]);
-&nbsp;
-	const changePhrase = () =&gt; {
-		const currentPhraseIndex = introductionPhrases.indexOf(phrase);
-		const nextPhraseIndex =
-			currentPhraseIndex &gt;= introductionPhrases.length - 1
-				? <span class="branch-0 cbranch-no" title="branch not covered" >0</span>
-				: currentPhraseIndex + 1;
-		setPhrase(introductionPhrases[nextPhraseIndex]);
-	};
-&nbsp;
 	return (
-		&lt;div className="bg-gray-950 w-screen h-screen flex flex-col items-center justify-center gap-5 p-5"&gt;
-			&lt;div className="flex flex-col items-center gap-3"&gt;
-				&lt;h1 className="text-3xl text-slate-200"&gt;{phrase}&lt;/h1&gt;
-				&lt;span className="text-xl text-slate-300"&gt;
-					Edit file src/app.tsx to start!
-				&lt;/span&gt;
-			&lt;/div&gt;
-			&lt;div className="flex flex-wrap items-center gap-5 z-10"&gt;
-				&lt;img src={ElectronLogo} width={50} height={50} alt="ElectronJS Logo" /&gt;
-				&lt;img src={ReactLogo} width={50} height={50} alt="ReactJS Logo" /&gt;
-				&lt;img
-					src={TailwindCSSLogo}
-					width={60}
-					height={50}
-					alt="TailwindCSS Logo"
-				/&gt;
-				&lt;img
-					src={ShadcnLogo}
-					width={60}
-					height={50}
-					alt="TailwindCSS Logo"
-					className="rounded-lg"
-				/&gt;
-				&lt;img src={ViteLogo} width={50} height={50} alt="Vite Logo" /&gt;
-				&lt;img src={VitestLogo} width={60} height={50} alt="Vitest Logo" /&gt;
-				&lt;img
-					src={ReactTestingLibraryLogo}
-					width={60}
-					height={50}
-					alt="Vitest Logo"
-				/&gt;
-				&lt;img src={BiomeLogo} width={160} height={50} alt="BiomeJS Logo" /&gt;
-			&lt;/div&gt;
-			&lt;Button
-				onClick={changePhrase}
-				className="z-10 bg-gray-900 text-slate-100"
-				data-testid="random-button"
-			&gt;
-				Click me!
-			&lt;/Button&gt;
-			&lt;div className="w-screen h-64 absolute top-[-200px] bg-blue-500/20 rounded-full blur-3xl z-0" /&gt;
+		&lt;div className="bg-panel flex h-screen w-screen"&gt;
+			&lt;FrameHost
+				id="main-layout"
+				storageKey="prompt-book-layout"
+				className="h-screen w-screen"
+				panels={[
+					{
+						id: "sidebar",
+						minSize: 15,
+						defaultSize: 12,
+						children: &lt;Sidebar /&gt;,
+					},
+					{
+						id: "canvas",
+						minSize: 25,
+						defaultSize: 45,
+						children: (
+							&lt;Canvas className="p-20"&gt;
+								&lt;WindowFrame
+									title="Login page"
+									className="w-[400px] overflow-hidden rounded-[8px]"
+								&gt;
+									&lt;div className="flex flex-col justify-end h-[calc(100vh-100px)]"&gt;
+										&lt;div className="p-2"&gt;
+											&lt;PromptBox /&gt;
+										&lt;/div&gt;
+									&lt;/div&gt;
+								&lt;/WindowFrame&gt;
+							&lt;/Canvas&gt;
+						),
+					},
+					{
+						id: "explorer",
+						minSize: 10,
+						defaultSize: 15,
+						children: &lt;ExplorerPanel /&gt;,
+					},
+					{
+						id: "outline",
+						minSize: 10,
+						defaultSize: 13,
+						children: &lt;OutlinePanel /&gt;,
+					},
+					{
+						id: "properties",
+						minSize: 12,
+						defaultSize: 15,
+						children: &lt;PropertiesPanel /&gt;,
+					},
+				]}
+			/&gt;
 		&lt;/div&gt;
 	);
 }
@@ -289,7 +271,7 @@ export default function App() {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-10-28T18:01:32.058Z
+                at 2026-03-16T23:07:53.700Z
             </div>
         <script src="../prettify.js"></script>
         <script>
