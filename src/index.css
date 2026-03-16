@@ -1,68 +1,107 @@
 @import "tailwindcss";
 
 @theme {
-	--color-background: 0 0% 100%;
-	--color-foreground: 224 71.4% 4.1%;
-	--color-card: 0 0% 100%;
-	--color-card-foreground: 224 71.4% 4.1%;
-	--color-popover: 0 0% 100%;
-	--color-popover-foreground: 224 71.4% 4.1%;
-	--color-primary: 220.9 39.3% 11%;
-	--color-primary-foreground: 210 20% 98%;
-	--color-secondary: 220 14.3% 95.9%;
-	--color-secondary-foreground: 220.9 39.3% 11%;
-	--color-muted: 220 14.3% 95.9%;
-	--color-muted-foreground: 220 8.9% 46.1%;
-	--color-accent: 220 14.3% 95.9%;
-	--color-accent-foreground: 220.9 39.3% 11%;
-	--color-destructive: 0 84.2% 60.2%;
-	--color-destructive-foreground: 210 20% 98%;
-	--color-border: 220 13% 91%;
-	--color-input: 220 13% 91%;
-	--color-ring: 224 71.4% 4.1%;
-	--color-chart-1: 12 76% 61%;
-	--color-chart-2: 173 58% 39%;
-	--color-chart-3: 197 37% 24%;
-	--color-chart-4: 43 74% 66%;
-	--color-chart-5: 27 87% 67%;
-	--radius: 0.5rem;
+  --color-background: 0 0% 100%;
+  --color-foreground: oklch(84.522% 0 none);
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 224 71.4% 4.1%;
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 224 71.4% 4.1%;
+  --color-primary: 220.9 39.3% 11%;
+  --color-primary-foreground: 210 20% 98%;
+  --color-secondary: 220 14.3% 95.9%;
+  --color-secondary-foreground: 220.9 39.3% 11%;
+  --color-muted: 220 14.3% 95.9%;
+  --color-muted-foreground: 220 8.9% 46.1%;
+  --color-accent: 220 14.3% 95.9%;
+  --color-accent-foreground: 220.9 39.3% 11%;
+  --color-destructive: 0 84.2% 60.2%;
+  --color-destructive-foreground: 210 20% 98%;
+  --color-input: 220 13% 91%;
+  --color-ring: 224 71.4% 4.1%;
+  --color-chart-1: 12 76% 61%;
+  --color-chart-2: 173 58% 39%;
+  --color-chart-3: 197 37% 24%;
+  --color-chart-4: 43 74% 66%;
+  --color-chart-5: 27 87% 67%;
+  --radius: 0.5rem;
+
+  --color-sky: oklch(67.616% 0.15459 241.89);
+  --color-sky-50: oklch(90.546% 0.04663 232.3);
+  --color-sky-100: oklch(87.656% 0.06146 233.58);
+  --color-sky-200: oklch(82.272% 0.08856 234.13);
+  --color-sky-300: oklch(76.9% 0.11459 235.97);
+  --color-sky-400: oklch(72.134% 0.13666 237.95);
+  --color-sky-500: oklch(67.616% 0.15459 241.89);
+  --color-sky-600: oklch(57.162% 0.1316 242.01);
+  --color-sky-700: oklch(45.456% 0.10259 241.57);
+  --color-sky-800: oklch(32.943% 0.07121 240.77);
+  --color-sky-900: oklch(19.386% 0.03509 234.38);
+  --color-sky-950: oklch(10.886% 0.01609 229.76);
+
+  --color-panel: oklch(20.904% 0 none);
+  --color-panel-50: oklch(55.897% 0 none);
+  --color-panel-100: oklch(52.43% 0 none);
+  --color-panel-200: oklch(44.953% 0 none);
+  --color-panel-300: oklch(37.53% 0 none);
+  --color-panel-400: oklch(29.313% 0 none);
+  --color-panel-500: oklch(20.904% 0 none);
+  --color-panel-600: oklch(16% 0 none);
+  --color-panel-700: oklch(12% 0 none);
+  --color-panel-800: oklch(8% 0 none);
+  --color-panel-900: oklch(4% 0 none);
+  --color-panel-950: oklch(0% 0 none);
+
+  --color-border: oklch(28.908% 0 none);
+  --color-border-50: oklch(62.341% 0 none);
+  --color-border-100: oklch(58.971% 0 none);
+  --color-border-200: oklch(51.73% 0 none);
+  --color-border-300: oklch(44.59% 0 none);
+  --color-border-400: oklch(36.768% 0 none);
+  --color-border-500: oklch(28.908% 0 none);
+  --color-border-600: oklch(16.842% 0 none);
+  --color-border-700: oklch(0% 0 none);
+  --color-border-800: oklch(0% 0 none);
+  --color-border-900: oklch(0% 0 none);
+  --color-border-950: oklch(0% 0 none);
 }
 
 @layer base {
-	* {
-		border-color: var(--color-border);
-	}
-	body {
-		background-color: var(--color-background);
-		color: var(--color-foreground);
-	}
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    font-size: 13px;
+    color: var(--color-foreground);
+  }
 }
 
 @media (prefers-color-scheme: dark) {
-	:root {
-		--color-background: 224 71.4% 4.1%;
-		--color-foreground: 210 20% 98%;
-		--color-card: 224 71.4% 4.1%;
-		--color-card-foreground: 210 20% 98%;
-		--color-popover: 224 71.4% 4.1%;
-		--color-popover-foreground: 210 20% 98%;
-		--color-primary: 210 20% 98%;
-		--color-primary-foreground: 220.9 39.3% 11%;
-		--color-secondary: 215 27.9% 16.9%;
-		--color-secondary-foreground: 210 20% 98%;
-		--color-muted: 215 27.9% 16.9%;
-		--color-muted-foreground: 217.9 10.6% 64.9%;
-		--color-accent: 215 27.9% 16.9%;
-		--color-accent-foreground: 210 20% 98%;
-		--color-destructive: 0 62.8% 30.6%;
-		--color-destructive-foreground: 210 20% 98%;
-		--color-border: 215 27.9% 16.9%;
-		--color-input: 215 27.9% 16.9%;
-		--color-ring: 216 12.2% 83.9%;
-		--color-chart-1: 220 70% 50%;
-		--color-chart-2: 160 60% 45%;
-		--color-chart-3: 30 80% 55%;
-		--color-chart-4: 280 65% 60%;
-		--color-chart-5: 340 75% 55%;
-	}
+  :root {
+    --color-background: 224 71.4% 4.1%;
+    --color-foreground: oklch(84.522% 0 none);
+    --color-card: 224 71.4% 4.1%;
+    --color-card-foreground: 210 20% 98%;
+    --color-popover: 224 71.4% 4.1%;
+    --color-popover-foreground: 210 20% 98%;
+    --color-primary: 210 20% 98%;
+    --color-primary-foreground: 220.9 39.3% 11%;
+    --color-secondary: 215 27.9% 16.9%;
+    --color-secondary-foreground: 210 20% 98%;
+    --color-muted: 215 27.9% 16.9%;
+    --color-muted-foreground: 217.9 10.6% 64.9%;
+    --color-accent: 215 27.9% 16.9%;
+    --color-accent-foreground: 210 20% 98%;
+    --color-destructive: 0 62.8% 30.6%;
+    --color-destructive-foreground: 210 20% 98%;
+    --color-border: 215 27.9% 16.9%;
+    --color-input: 215 27.9% 16.9%;
+    --color-ring: 216 12.2% 83.9%;
+    --color-chart-1: 220 70% 50%;
+    --color-chart-2: 160 60% 45%;
+    --color-chart-3: 30 80% 55%;
+    --color-chart-4: 280 65% 60%;
+    --color-chart-5: 340 75% 55%;
+  }
 }
