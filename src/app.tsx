@@ -1,4 +1,11 @@
-import { Canvas, ExplorerPanel, FrameHost, Header, Sidebar, WindowFrame } from "@/ui";
+import {
+  Canvas,
+  ExplorerPanel,
+  FrameHost,
+  Header,
+  Sidebar,
+  WindowFrame,
+} from "@/ui";
 import PromptBox from "./components/PromptBox";
 
 export default function App() {
@@ -20,20 +27,7 @@ export default function App() {
             id: "canvas",
             minSize: 250,
             defaultSize: 45,
-            children: (
-              <Canvas className="p-10">
-                <WindowFrame
-                  title="Login page"
-                  className="overflow-hidden rounded-[8px]"
-                >
-                  <div className="flex flex-col justify-end h-screen">
-                    <div className="p-4 w-[520px]">
-                      <PromptBox />
-                    </div>
-                  </div>
-                </WindowFrame>
-              </Canvas>
-            ),
+            children: <Canvas className="p-10"></Canvas>,
           },
           {
             id: "explorer",

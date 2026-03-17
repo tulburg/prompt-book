@@ -80,6 +80,13 @@
   }
 }
 
+.electron-drag-region {
+  -webkit-app-region: drag;
+}
+.electron-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 .resize-handle {
   width: 2px;
   min-width: 2px;
@@ -90,6 +97,9 @@
     background-color 0.15s ease,
     border-color 0.15s ease;
   cursor: col-resize;
+  height: 96%;
+  margin-top: auto;
+  margin-bottom: auto;
 }
 .resize-handle:focus-visible {
   outline: none;

@@ -54,7 +54,7 @@ export function FrameHost({
         id={panel.id}
         defaultSize={panel.defaultSize ?? 100 / panels.length}
         minSize={panel.minSize ?? 10}
-        className={cn("h-full overflow-auto", panel.className)}
+        className={cn("h-full overflow-hidden px-1", panel.className)}
       >
         <div className="h-full min-h-0">{panel.children}</div>
       </Panel>,
@@ -64,8 +64,7 @@ export function FrameHost({
   return (
     <Group
       id={id}
-      className={cn("h-full w-full", className)}
-      direction="horizontal"
+      className={cn("h-full w-full pl-1 pb-2 pr-1", className)}
       defaultLayout={defaultLayout}
       onLayoutChanged={onLayoutChanged}
     >
