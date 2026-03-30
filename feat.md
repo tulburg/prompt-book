@@ -28,6 +28,16 @@
 
 ### Contexts
 
+A context is pointer document. Its role is to point to all references of first contact information about any subject. i.e. for a codebase, 1 of those first contact information is package manager, run scripts etc. things to know without having to scan or search for them are what makes a context
+A context is pointer document. Its role is to point to all references of first contact information about any subject. i.e. for a codebase, 1 of those first contact information is package manager, run scripts etc. things to know without having to scan or search for them are what makes a context
+
+Do not general random texts. The format is simply
+
+```
+Heading / Name of grouping:
+- One sentence of [first contact / how to / feature] - [Value]
+```
+
 - Building context is done at every point we can, from loading the codebase. We build the codebase context
 - - Defining the project structure
 - - Package manager in applicable cases

@@ -22,3 +22,20 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   // You can expose other APTs you need here.
   // ...
 })
+
+contextBridge.exposeInMainWorld("projectBridge", {
+  restoreLastProject: () => ipcRenderer.invoke("project:restore-last"),
+  openProjectFolder: () => ipcRenderer.invoke("project:open-folder"),
+  refreshProject: (rootPath: string) => ipcRenderer.invoke("project:refresh", rootPath),
+  readFile: (filePath: string) => ipcRenderer.invoke("project:read-file", filePath),
+  writeFile: (filePath: string, content: string) =>
+    ipcRenderer.invoke("project:write-file", filePath, content),
+  createFile: (parentPath: string, name: string, content?: string) =>
+    ipcRenderer.invoke("project:create-file", parentPath, name, content),
+  createFolder: (parentPath: string, name: string) =>
+    ipcRenderer.invoke("project:create-folder", parentPath, name),
+  renamePath: (targetPath: string, nextName: string) =>
+    ipcRenderer.invoke("project:rename-path", targetPath, nextName),
+  deletePath: (targetPath: string) =>
+    ipcRenderer.invoke("project:delete-path", targetPath),
+})

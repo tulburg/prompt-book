@@ -64,6 +64,7 @@ export function FrameHost({
   return (
     <Group
       id={id}
+      data-testid={id}
       className={cn("h-full w-full pl-1 pb-2 pr-1", className)}
       defaultLayout={defaultLayout}
       onLayoutChanged={onLayoutChanged}

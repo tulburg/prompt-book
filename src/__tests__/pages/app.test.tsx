@@ -7,12 +7,12 @@ describe("app page", () => {
 		render(<App />);
 	};
 
-	it("should render app page with FrameHost layout", () => {
+	it("should render the file manager layout", () => {
 		setup();
-		expect(screen.getByText("Sidebar")).toBeDefined();
-		expect(screen.getByText("Explorer")).toBeDefined();
-		expect(screen.getByText("Outline")).toBeDefined();
-		expect(screen.getByText("Properties")).toBeDefined();
+		expect(screen.getAllByText("Open Project Folder").length).toBeGreaterThan(0);
+		expect(screen.getByLabelText("New file")).toBeDefined();
+		expect(screen.getByLabelText("New folder")).toBeDefined();
+		expect(screen.getByText("Details")).toBeDefined();
 	});
 
 	it("should render resizable panel group", () => {
