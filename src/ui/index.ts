@@ -6,3 +6,4 @@ export * from "./higher/WindowFrame";
 
 export * from "./lower/Button";
 export * from "./lower/Header";
+export * from "./lower/Typography";

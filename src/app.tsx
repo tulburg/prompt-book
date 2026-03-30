@@ -1,12 +1,4 @@
-import {
-  Canvas,
-  ExplorerPanel,
-  FrameHost,
-  Header,
-  Sidebar,
-  WindowFrame,
-} from "@/ui";
-import PromptBox from "./components/PromptBox";
+import { PromptEditor, ExplorerPanel, FrameHost, Header, Sidebar } from "@/ui";
 
 export default function App() {
   return (
@@ -24,10 +16,10 @@ export default function App() {
             children: <Sidebar />,
           },
           {
-            id: "canvas",
+            id: "editor",
             minSize: 250,
             defaultSize: 45,
-            children: <Canvas className="p-10"></Canvas>,
+            children: <PromptEditor />,
           },
           {
             id: "explorer",

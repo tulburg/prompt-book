@@ -1,12 +1,16 @@
-export function Canvas({
+import { Title } from "../lower/Typography";
+
+export function PromptEditor({
   className,
-  children,
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={`flex bg-panel-700 border-border-500 rounded-[16px] border-t border-r border-l opacity-100 h-full min-h-0 ${className ?? ""}`}
+      className={`grid grid-cols-[1fr_300px] bg-panel-700 rounded-[16px] opacity-100 h-full min-h-0 ${className ?? ""}`}
     >
-      {children}
+      <div className="flex"></div>
+      <div className="flex border-l border-border-500 p-6">
+        <Title>Resources</Title>
+      </div>
     </div>
   );
 }

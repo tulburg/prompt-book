@@ -10,6 +10,47 @@
 - Since the model will still have to summary the prompts into a plans, the log and history of previous prompts in the log should be displayed next to each other
 - This simply means, the model activities are mostly hidden between each prompt events (log), and can only be viewed when requested.
 
-### Using AIs
+### Runtime Analysis / Terminal
 
-Embraces the crazy!!!
+- The app must integrate well with terminal and setting up debug mode to always during development.
+- - This is for when there's a runtime error. We can quickly highlight the problematic node, share the report with the user and approach a fix
+
+### Showing workflows
+
+- If each process / functionality is represented well as a node, we can have tiny flow diagrams per node that shows the internal workings of the process
+- This diagram will not be basic, it will be html rendered, highlighting the current node and the parent flow into it and its dependencies and children
+
+### Runtime flow
+
+- We integrate well with generated tests scripts that can easily be run from any node to check if that node is working as expected
+- The already generated runtime outputs can then be highlighted as the test checks each steps to show they pass or fail
+- The runtime outputs make up the runtime diagram that can show how things work and flow from one to the other, this can be viewed starting from any node
+
+### Contexts
+
+- Building context is done at every point we can, from loading the codebase. We build the codebase context
+- - Defining the project structure
+- - Package manager in applicable cases
+- - Build process and all important context the model will need to understand the codes base
+- These context(s) are built with title and list descriptions of what they provide
+- So when these context list is sent with the user message to the model, the model can decide which contexts to load into memory
+- Contexts can be design system context, codebase context, project context, environment context, deployment context etc.
+  ``
+
+### Grill me skill
+
+name: grill-me
+3
+description: Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions "grill me".
+4
+ーーー
+5
+6
+Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one.
+For each question, provide your recommended answer.
+7
+8
+If a question can be answered by exploring the codebase, explore the codebase instead.
+
+``
+`

@@ -2,7 +2,6 @@
 
 @theme {
   --color-background: 0 0% 100%;
-  --color-foreground: oklch(84.522% 0 none);
   --color-card: 0 0% 100%;
   --color-card-foreground: 224 71.4% 4.1%;
   --color-popover: 0 0% 100%;
@@ -67,6 +66,19 @@
   --color-border-800: oklch(0% 0 none);
   --color-border-900: oklch(0% 0 none);
   --color-border-950: oklch(0% 0 none);
+
+  --color-foreground: oklch(84.522% 0 none);
+  --color-foreground-50: oklch(100% 0 none);
+  --color-foreground-100: oklch(100% 0 none);
+  --color-foreground-200: oklch(100% 0 none);
+  --color-foreground-300: oklch(97.015% 0 none);
+  --color-foreground-400: oklch(90.67% 0 none);
+  --color-foreground-500: oklch(84.522% 0 none);
+  --color-foreground-600: oklch(75.721% 0 none);
+  --color-foreground-700: oklch(66.655% 0 none);
+  --color-foreground-800: oklch(57.268% 0 none);
+  --color-foreground-900: oklch(47.478% 0 none);
+  --color-foreground-950: oklch(42.393% 0 none);
 }
 
 @layer base {
