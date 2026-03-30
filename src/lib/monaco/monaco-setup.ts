@@ -23,7 +23,7 @@ function createTheme(monaco: MonacoModule) {
       "editorLineNumber.foreground": "#6b7280",
       "editorLineNumber.activeForeground": "#d8dee9",
       "editorCursor.foreground": "#60a5fa",
-      "editor.selectionBackground": "#1d4ed833",
+      "editor.selectionBackground": "#e0e0e022",
       "editor.inactiveSelectionBackground": "#33415540",
     },
   });

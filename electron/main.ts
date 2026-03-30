@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, screen } from "electron";
 import Store from "electron-store";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import type { NativeContextMenuRequest } from "../src/lib/native-context-menu";
 
 createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -492,6 +493,49 @@ ipcMain.handle("project:delete-path", async (_event, targetPath: string) => {
     parentPath,
   };
 });
+
+ipcMain.handle(
+  "ui:show-native-context-menu",
+  async (event, request: NativeContextMenuRequest) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? win;
+    if (!targetWindow) {
+      return null;
+    }
+
+    return await new Promise<string | null>((resolve) => {
+      let settled = false;
+      const settle = (actionId: string | null) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(actionId);
+      };
+
+      const menu = Menu.buildFromTemplate(
+        request.items.map((item) => {
+          if (item.type === "separator") {
+            return { type: "separator" as const };
+          }
+
+          return {
+            accelerator: item.accelerator,
+            click: () => settle(item.id),
+            enabled: item.enabled ?? true,
+            label: item.label,
+          };
+        }),
+      );
+
+      menu.popup({
+        callback: () => settle(null),
+        window: targetWindow,
+        x: typeof request.x === "number" ? Math.floor(request.x) : undefined,
+        y: typeof request.y === "number" ? Math.floor(request.y) : undefined,
+      });
+    });
+  },
+);
 
 // Save window state before quitting
 app.on("before-quit", () => {

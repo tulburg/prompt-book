@@ -33,6 +33,7 @@ export default function App() {
                 onOpenProjectFolder={projectManager.openProjectFolder}
                 onRefresh={() => projectManager.refreshProject()}
                 onRenameNode={projectManager.renameNode}
+                onSelectNode={projectManager.selectNode}
                 pendingCreate={projectManager.pendingCreate}
                 project={projectManager.project}
                 renamingPath={projectManager.renamingPath}

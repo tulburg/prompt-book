@@ -511,6 +511,11 @@ export function useProjectManager() {
 		[projectBridge, setError],
 	);
 
+	const selectNode = React.useCallback((node: ProjectNode) => {
+		setSelectedPath(node.path);
+		setError(null);
+	}, []);
+
 	const updateActiveFileContent = React.useCallback((content: string) => {
 		setActiveFile((current) => {
 			if (!current) {
@@ -758,6 +763,7 @@ export function useProjectManager() {
 		isBootstrapping,
 		isBusy,
 		openNode,
+		selectNode,
 		openProjectFolder,
 		pendingCreate,
 		project,

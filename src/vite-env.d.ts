@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import type { NativeContextMenuBridge } from "@/lib/native-context-menu";
 import type { ProjectBridge } from "@/lib/project-files";
 
 declare global {
@@ -13,6 +14,7 @@ declare global {
 		MonacoEnvironment?: {
 			getWorker: (workerId: string, label: string) => Worker;
 		};
+		nativeContextMenu?: NativeContextMenuBridge;
 		projectBridge?: ProjectBridge;
 	}
 }

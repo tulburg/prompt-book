@@ -1,4 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
+import type { NativeContextMenuRequest } from '../src/lib/native-context-menu'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -40,4 +41,9 @@ contextBridge.exposeInMainWorld("projectBridge", {
     ipcRenderer.invoke("project:rename-path", targetPath, nextName),
   deletePath: (targetPath: string) =>
     ipcRenderer.invoke("project:delete-path", targetPath),
+})
+
+contextBridge.exposeInMainWorld("nativeContextMenu", {
+  showMenu: (request: NativeContextMenuRequest) =>
+    ipcRenderer.invoke("ui:show-native-context-menu", request),
 })

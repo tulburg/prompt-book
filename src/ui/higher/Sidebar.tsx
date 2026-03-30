@@ -11,6 +11,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import * as React from "react";
+import type { NativeContextMenuItem } from "@/lib/native-context-menu";
 import type { ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
 import { Button } from "@/ui/lower/Button";
 
@@ -36,6 +37,46 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	onRenameNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
 	onCancelInlineState: () => void;
+	onSelectNode: (node: ProjectNode) => void;
+}
+
+interface ContextMenuState {
+	node: ProjectNode;
+	x: number;
+	y: number;
+}
+
+function buildContextMenuItems(node: ProjectNode): NativeContextMenuItem[] {
+	const items: NativeContextMenuItem[] = [];
+
+	if (node.kind === "directory") {
+		items.push(
+			{
+				type: "action",
+				id: "new-file",
+				label: "New File",
+				accelerator: "CmdOrCtrl+N",
+			},
+			{
+				type: "action",
+				id: "new-folder",
+				label: "New Folder",
+				accelerator: "CmdOrCtrl+Shift+N",
+			},
+		);
+	}
+
+	if (node.parentPath) {
+		if (items.length > 0) {
+			items.push({ type: "separator" });
+		}
+		items.push(
+			{ type: "action", id: "rename", label: "Rename", accelerator: "Enter" },
+			{ type: "action", id: "delete", label: "Delete", accelerator: "Backspace" },
+		);
+	}
+
+	return items;
 }
 
 function InlineNameForm({
@@ -94,6 +135,8 @@ function ProjectTree({
 	onDeleteNode,
 	onOpenNode,
 	onRenameNode,
+	onSelectNode,
+	onOpenContextMenu,
 	pendingCreate,
 	renamingPath,
 	selectedPath,
@@ -108,6 +151,8 @@ function ProjectTree({
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
 	onRenameNode: (name: string) => void | Promise<void>;
+	onSelectNode: (node: ProjectNode) => void;
+	onOpenContextMenu: (node: ProjectNode, x: number, y: number) => void;
 	pendingCreate: PendingCreateState | null;
 	renamingPath: string | null;
 	selectedPath: string | null;
@@ -115,7 +160,6 @@ function ProjectTree({
 	const isDirectory = node.kind === "directory";
 	const isExpanded = expandedPaths.has(node.path);
 	const isSelected = selectedPath === node.path;
-	const isRoot = depth === 0;
 	const isRenaming = renamingPath === node.path;
 	const showInlineCreate = pendingCreate?.parentPath === node.path && isDirectory;
 	const Icon = isDirectory ? (isExpanded ? FolderOpen : Folder) : File;
@@ -152,6 +196,17 @@ function ProjectTree({
 						type="button"
 						className="flex min-w-0 flex-1 items-center gap-2 text-left"
 						onClick={() => void onOpenNode(node)}
+						onContextMenu={(event) => {
+							event.preventDefault();
+							onOpenContextMenu(node, event.clientX, event.clientY);
+						}}
+						onKeyDown={(event) => {
+							if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+								event.preventDefault();
+								const rect = event.currentTarget.getBoundingClientRect();
+								onOpenContextMenu(node, rect.left + 12, rect.bottom + 4);
+							}
+						}}
 					>
 						<span className="flex h-4 w-4 items-center justify-center text-foreground/50">
 							{isDirectory ? (
@@ -171,73 +226,6 @@ function ProjectTree({
 						) : null}
 					</button>
 				)}
-
-				{!isRenaming ? (
-					<div
-						className={`flex items-center gap-1 ${
-							isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-						}`}
-					>
-						{isDirectory ? (
-							<>
-								<Button
-									size="icon"
-									variant="ghost"
-									className="h-6 w-6"
-									aria-label={`Create file in ${node.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										onBeginCreate("file", node.path);
-									}}
-								>
-									<FilePlus className="h-3.5 w-3.5" />
-								</Button>
-								<Button
-									size="icon"
-									variant="ghost"
-									className="h-6 w-6"
-									aria-label={`Create folder in ${node.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										onBeginCreate("directory", node.path);
-									}}
-								>
-									<FolderPlus className="h-3.5 w-3.5" />
-								</Button>
-							</>
-						) : null}
-						{!isRoot ? (
-							<>
-								<Button
-									size="icon"
-									variant="ghost"
-									className="h-6 w-6"
-									aria-label={`Rename ${node.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										onBeginRename(node.path);
-									}}
-								>
-									<Pencil className="h-3.5 w-3.5" />
-								</Button>
-								<Button
-									size="icon"
-									variant="ghost"
-									className="h-6 w-6 text-destructive-foreground/80 hover:text-destructive-foreground"
-									aria-label={`Delete ${node.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										if (window.confirm(`Delete "${node.name}"?`)) {
-											void onDeleteNode(node.path);
-										}
-									}}
-								>
-									<Trash2 className="h-3.5 w-3.5" />
-								</Button>
-							</>
-						) : null}
-					</div>
-				) : null}
 			</div>
 
 			{isDirectory && isExpanded ? (
@@ -263,6 +251,8 @@ function ProjectTree({
 							onDeleteNode={onDeleteNode}
 							onOpenNode={onOpenNode}
 							onRenameNode={onRenameNode}
+							onSelectNode={onSelectNode}
+							onOpenContextMenu={onOpenContextMenu}
 							pendingCreate={pendingCreate}
 							renamingPath={renamingPath}
 							selectedPath={selectedPath}
@@ -305,11 +295,100 @@ export function Sidebar({
 	onOpenProjectFolder,
 	onRefresh,
 	onRenameNode,
+	onSelectNode,
 	pendingCreate,
 	project,
 	renamingPath,
 	selectedPath,
 }: SidebarProps) {
+	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
+	const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+	const canRenameOrDelete = Boolean(
+		contextMenu?.node && contextMenu.node.parentPath,
+	);
+
+	React.useEffect(() => {
+		if (!contextMenu) {
+			return;
+		}
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (contextMenuRef.current?.contains(event.target as Node)) {
+				return;
+			}
+			setContextMenu(null);
+		};
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setContextMenu(null);
+			}
+		};
+
+		window.addEventListener("mousedown", handlePointerDown);
+		window.addEventListener("resize", handleEscape as unknown as EventListener);
+		window.addEventListener("keydown", handleEscape);
+
+		return () => {
+			window.removeEventListener("mousedown", handlePointerDown);
+			window.removeEventListener("resize", handleEscape as unknown as EventListener);
+			window.removeEventListener("keydown", handleEscape);
+		};
+	}, [contextMenu]);
+
+	const openContextMenu = React.useCallback(
+		async (node: ProjectNode, x: number, y: number) => {
+			onSelectNode(node);
+			const nativeContextMenu = window.nativeContextMenu;
+			if (nativeContextMenu) {
+				const actionId = await nativeContextMenu.showMenu({
+					items: buildContextMenuItems(node),
+					x,
+					y,
+				});
+				if (actionId) {
+					switch (actionId) {
+						case "new-file":
+							onBeginCreate("file", node.path);
+							break;
+						case "new-folder":
+							onBeginCreate("directory", node.path);
+							break;
+						case "rename":
+							onBeginRename(node.path);
+							break;
+						case "delete":
+							if (window.confirm(`Delete "${node.name}"?`)) {
+								void onDeleteNode(node.path);
+							}
+							break;
+						default:
+							break;
+					}
+				}
+				return;
+			}
+
+			setContextMenu({ node, x, y });
+		},
+		[onBeginCreate, onBeginRename, onDeleteNode, onSelectNode],
+	);
+
+	const closeContextMenu = React.useCallback(() => {
+		setContextMenu(null);
+	}, []);
+
+	const runMenuAction = React.useCallback(
+		(action: () => void | Promise<void>) => {
+			closeContextMenu();
+			void action();
+		},
+		[closeContextMenu],
+	);
+
+	const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 210) : 0;
+	const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 220) : 0;
+
 	return (
 		<div
 			className={`flex h-full flex-col rounded-[16px] bg-panel ${className ?? ""}`}
@@ -392,6 +471,8 @@ export function Sidebar({
 							onDeleteNode={onDeleteNode}
 							onOpenNode={onOpenNode}
 							onRenameNode={onRenameNode}
+							onSelectNode={onSelectNode}
+							onOpenContextMenu={openContextMenu}
 							pendingCreate={pendingCreate}
 							renamingPath={renamingPath}
 							selectedPath={selectedPath}
@@ -417,6 +498,71 @@ export function Sidebar({
 					</div>
 				)}
 			</div>
+
+			{contextMenu ? (
+				<div
+					ref={contextMenuRef}
+					className="fixed z-50 min-w-[180px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-2xl"
+					style={{ left: `${menuX}px`, top: `${menuY}px` }}
+				>
+					{contextMenu.node.kind === "directory" ? (
+						<>
+							<button
+								type="button"
+								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
+								onClick={() =>
+									runMenuAction(() => onBeginCreate("file", contextMenu.node.path))
+								}
+							>
+								<FilePlus className="h-4 w-4" />
+								New File
+							</button>
+							<button
+								type="button"
+								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
+								onClick={() =>
+									runMenuAction(() =>
+										onBeginCreate("directory", contextMenu.node.path),
+									)
+								}
+							>
+								<FolderPlus className="h-4 w-4" />
+								New Folder
+							</button>
+						</>
+					) : null}
+
+					{canRenameOrDelete ? (
+						<>
+							<div className="my-1 border-t border-border-500" />
+							<button
+								type="button"
+								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
+								onClick={() =>
+									runMenuAction(() => onBeginRename(contextMenu.node.path))
+								}
+							>
+								<Pencil className="h-4 w-4" />
+								Rename
+							</button>
+							<button
+								type="button"
+								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-destructive-foreground/80 hover:bg-panel-500 hover:text-destructive-foreground"
+								onClick={() =>
+									runMenuAction(() => {
+										if (window.confirm(`Delete "${contextMenu.node.name}"?`)) {
+											return onDeleteNode(contextMenu.node.path);
+										}
+									})
+								}
+							>
+								<Trash2 className="h-4 w-4" />
+								Delete
+							</button>
+						</>
+					) : null}
+				</div>
+			) : null}
 		</div>
 	);
 }
