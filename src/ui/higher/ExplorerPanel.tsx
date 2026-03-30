@@ -60,8 +60,8 @@ export function ExplorerPanel({
 	project,
 	selectedNode,
 }: ExplorerPanelProps) {
-	const selectedPath = selectedNode?.path ?? project?.rootPath;
-	const canManageSelection = Boolean(selectedNode && selectedNode.path !== project?.rootPath);
+	const selectedPath = selectedNode?.path ?? project?.roots[0]?.path;
+	const canManageSelection = Boolean(selectedNode && selectedNode.parentPath);
 
 	return (
 		<div
@@ -77,7 +77,13 @@ export function ExplorerPanel({
 					<div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
 						Project
 					</div>
-					<div>{project?.rootName ?? "No folder opened"}</div>
+					<div>
+						{project
+							? project.roots.length === 1
+								? project.roots[0]?.name
+								: `${project.roots.length} workspace folders`
+							: "No folder opened"}
+					</div>
 				</div>
 				<div>
 					<div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
@@ -131,7 +137,13 @@ export function ExplorerPanel({
 						<div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
 							Children
 						</div>
-						<div>{selectedNode.children?.length ?? 0}</div>
+						<div>
+							{selectedNode.isLoading
+								? "Loading..."
+								: selectedNode.isDirectoryResolved
+									? selectedNode.children?.length ?? 0
+									: "Expand to load"}
+						</div>
 					</div>
 				) : null}
 			</div>

@@ -242,6 +242,14 @@ function ProjectTree({
 
 			{isDirectory && isExpanded ? (
 				<div>
+					{node.isLoading ? (
+						<div
+							className="px-2 py-1 text-xs text-foreground/45"
+							style={{ paddingLeft: `${(depth + 1) * 14 + 36}px` }}
+						>
+							Loading...
+						</div>
+					) : null}
 					{node.children?.map((child) => (
 						<ProjectTree
 							key={child.path}
@@ -312,7 +320,11 @@ export function Sidebar({
 						Project
 					</div>
 					<div className="truncate text-sm font-medium text-foreground">
-						{project?.rootName ?? "No folder opened"}
+						{project
+							? project.roots.length === 1
+								? project.roots[0]?.name
+								: `${project.roots.length} workspace folders`
+							: "No folder opened"}
 					</div>
 				</div>
 				<div className="flex items-center gap-1">
@@ -331,7 +343,7 @@ export function Sidebar({
 						className="h-8 w-8"
 						aria-label="New file"
 						disabled={!project}
-						onClick={() => onBeginCreate("file", selectedPath ?? project?.rootPath)}
+						onClick={() => onBeginCreate("file", selectedPath ?? project?.roots[0]?.path)}
 					>
 						<FilePlus className="h-4 w-4" />
 					</Button>
@@ -342,7 +354,7 @@ export function Sidebar({
 						aria-label="New folder"
 						disabled={!project}
 						onClick={() =>
-							onBeginCreate("directory", selectedPath ?? project?.rootPath)
+							onBeginCreate("directory", selectedPath ?? project?.roots[0]?.path)
 						}
 					>
 						<FolderPlus className="h-4 w-4" />
@@ -368,20 +380,23 @@ export function Sidebar({
 
 			<div className="min-h-0 flex-1 overflow-auto px-2 py-3">
 				{project ? (
-					<ProjectTree
-						expandedPaths={expandedPaths}
-						node={project.tree}
-						onBeginCreate={onBeginCreate}
-						onBeginRename={onBeginRename}
-						onCancelInlineState={onCancelInlineState}
-						onCreateNode={onCreateNode}
-						onDeleteNode={onDeleteNode}
-						onOpenNode={onOpenNode}
-						onRenameNode={onRenameNode}
-						pendingCreate={pendingCreate}
-						renamingPath={renamingPath}
-						selectedPath={selectedPath}
-					/>
+					project.roots.map((root) => (
+						<ProjectTree
+							key={root.path}
+							expandedPaths={expandedPaths}
+							node={root}
+							onBeginCreate={onBeginCreate}
+							onBeginRename={onBeginRename}
+							onCancelInlineState={onCancelInlineState}
+							onCreateNode={onCreateNode}
+							onDeleteNode={onDeleteNode}
+							onOpenNode={onOpenNode}
+							onRenameNode={onRenameNode}
+							pendingCreate={pendingCreate}
+							renamingPath={renamingPath}
+							selectedPath={selectedPath}
+						/>
+					))
 				) : (
 					<div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
 						<div className="rounded-full border border-border-500 bg-panel-600 p-3">

@@ -1,8 +1,12 @@
 import type {
+	CreateNodeResult,
+	DeleteNodeResult,
+	DirectoryListingResult,
 	ProjectBridge,
 	ProjectNode,
 	ProjectPermissions,
 	ProjectSnapshot,
+	RenameNodeResult,
 } from "@/lib/project-files";
 
 type BrowserPermissionState = "granted" | "prompt" | "denied";
@@ -49,11 +53,46 @@ interface BrowserWindowWithFs extends Window {
 	showDirectoryPicker(): Promise<BrowserDirectoryHandle>;
 }
 
-let rootHandle: BrowserDirectoryHandle | null = null;
-let rootPath = "";
+const rootHandles = new Map<string, BrowserDirectoryHandle>();
 
 function joinProjectPath(parentPath: string, name: string) {
 	return parentPath === "/" ? `/${name}` : `${parentPath.replace(/\/$/, "")}/${name}`;
+}
+
+function normalizeProjectPath(targetPath: string) {
+	return targetPath.replace(/\/+$/, "") || "/";
+}
+
+function dedupeProjectPaths(paths: string[]) {
+	return [...new Set(paths.map((path) => normalizeProjectPath(path)))];
+}
+
+function getWorkspaceRootPaths() {
+	return dedupeProjectPaths([...rootHandles.keys()]);
+}
+
+function getRootPathForTarget(targetPath: string) {
+	const normalizedTargetPath = normalizeProjectPath(targetPath);
+	return getWorkspaceRootPaths()
+		.sort((left, right) => right.length - left.length)
+		.find(
+			(rootPath) =>
+				normalizedTargetPath === rootPath ||
+				normalizedTargetPath.startsWith(`${rootPath}/`),
+		);
+}
+
+function createUniqueRootPath(handle: BrowserDirectoryHandle) {
+	const basePath = normalizeProjectPath(`/${handle.name}`);
+	if (!rootHandles.has(basePath)) {
+		return basePath;
+	}
+
+	let suffix = 2;
+	while (rootHandles.has(`${basePath}-${suffix}`)) {
+		suffix += 1;
+	}
+	return `${basePath}-${suffix}`;
 }
 
 function isBrowserDirectoryHandle(
@@ -67,6 +106,7 @@ function isBrowserFileHandle(handle: BrowserHandle): handle is BrowserFileHandle
 }
 
 function getRelativeSegments(targetPath: string) {
+	const rootPath = getRootPathForTarget(targetPath);
 	if (!rootPath || targetPath === rootPath) {
 		return [];
 	}
@@ -133,6 +173,8 @@ async function ensurePermission(
 }
 
 async function resolveHandle(targetPath: string): Promise<BrowserHandle> {
+	const rootPath = getRootPathForTarget(targetPath);
+	const rootHandle = rootPath ? rootHandles.get(rootPath) ?? null : null;
 	if (!rootHandle || !rootPath) {
 		throw new Error("Open a project folder before working with files.");
 	}
@@ -174,6 +216,10 @@ async function resolveDirectoryHandle(
 }
 
 async function resolveParent(targetPath: string) {
+	const rootPath = getRootPathForTarget(targetPath);
+	if (!rootPath) {
+		throw new Error(`No workspace root found for: ${targetPath}`);
+	}
 	if (targetPath === rootPath) {
 		throw new Error("The project root cannot be modified this way.");
 	}
@@ -229,6 +275,8 @@ async function copyDirectoryHandle(
 async function buildNode(
 	handle: BrowserDirectoryHandle | BrowserFileHandle,
 	currentPath: string,
+	parentPath: string | null,
+	rootPath: string,
 ): Promise<ProjectNode> {
 	const permissions = await getPermissions(handle);
 
@@ -238,47 +286,106 @@ async function buildNode(
 			path: currentPath,
 			name: handle.name,
 			kind: "file",
+			parentPath,
+			rootPath,
 			permissions,
 			modifiedAt: file.lastModified,
 			size: file.size,
 		};
 	}
 
-	const children: ProjectNode[] = [];
-	if (permissions.read) {
-		for await (const [name, entryHandle] of handle.entries()) {
-			children.push(await buildNode(entryHandle, joinProjectPath(currentPath, name)));
-		}
-	}
-
-	children.sort((left, right) => {
-		if (left.kind !== right.kind) {
-			return left.kind === "directory" ? -1 : 1;
-		}
-		return left.name.localeCompare(right.name);
-	});
-
 	return {
 		path: currentPath,
 		name: handle.name,
 		kind: "directory",
+		parentPath,
+		rootPath,
 		permissions,
-		children,
+		isDirectoryResolved: false,
 	};
 }
 
 async function buildSnapshot(): Promise<ProjectSnapshot> {
-	if (!rootHandle || !rootPath) {
+	const rootPaths = getWorkspaceRootPaths();
+	if (rootPaths.length === 0) {
 		throw new Error("Open a project folder before refreshing the explorer.");
 	}
 
-	const permissions = await getPermissions(rootHandle);
 	return {
-		rootPath,
-		rootName: rootHandle.name,
 		source: "web",
-		permissions,
-		tree: await buildNode(rootHandle, rootPath),
+		roots: await Promise.all(
+			rootPaths.map(async (rootPath) => {
+				const handle = rootHandles.get(rootPath);
+				if (!handle) {
+					throw new Error(`Missing workspace root: ${rootPath}`);
+				}
+				return buildNode(handle, rootPath, null, rootPath);
+			}),
+		),
+	};
+}
+
+function sortNodes(left: ProjectNode, right: ProjectNode) {
+	if (left.kind !== right.kind) {
+		return left.kind === "directory" ? -1 : 1;
+	}
+	return left.name.localeCompare(right.name);
+}
+
+async function listDirectory(directoryPath: string): Promise<DirectoryListingResult> {
+	const directoryHandle = await resolveDirectoryHandle(directoryPath);
+	await ensurePermission(directoryHandle, "read");
+	const rootPath = getRootPathForTarget(directoryPath);
+	if (!rootPath) {
+		throw new Error(`No workspace root found for: ${directoryPath}`);
+	}
+
+	const children: ProjectNode[] = [];
+	for await (const [name, entryHandle] of directoryHandle.entries()) {
+		children.push(
+			await buildNode(entryHandle, joinProjectPath(directoryPath, name), directoryPath, rootPath),
+		);
+	}
+
+	children.sort(sortNodes);
+	return {
+		path: directoryPath,
+		children,
+		permissions: await getPermissions(directoryHandle),
+	};
+}
+
+async function createNodeResult(
+	parentPath: string,
+	nodePath: string,
+): Promise<CreateNodeResult> {
+	const handle = await resolveHandle(nodePath);
+	const rootPath = getRootPathForTarget(nodePath);
+	if (!rootPath) {
+		throw new Error(`No workspace root found for: ${nodePath}`);
+	}
+
+	return {
+		parentPath,
+		node: await buildNode(handle as BrowserDirectoryHandle | BrowserFileHandle, nodePath, parentPath, rootPath),
+	};
+}
+
+async function createRenameResult(
+	oldPath: string,
+	nextPath: string,
+	parentPath: string,
+): Promise<RenameNodeResult> {
+	const handle = await resolveHandle(nextPath);
+	const rootPath = getRootPathForTarget(nextPath);
+	if (!rootPath) {
+		throw new Error(`No workspace root found for: ${nextPath}`);
+	}
+
+	return {
+		oldPath,
+		parentPath,
+		node: await buildNode(handle as BrowserDirectoryHandle | BrowserFileHandle, nextPath, parentPath, rootPath),
 	};
 }
 
@@ -299,18 +406,20 @@ export function createBrowserProjectBridge(): ProjectBridge | undefined {
 
 		async openProjectFolder() {
 			const handle = await browserWindow.showDirectoryPicker();
-			await ensurePermission(handle, "readwrite");
-			rootHandle = handle;
-			rootPath = `/${handle.name}`;
+			await ensurePermission(handle, "read");
+			const rootPath = createUniqueRootPath(handle);
+			rootHandles.set(rootPath, handle);
 			return buildSnapshot();
 		},
 
 		async refreshProject() {
-			if (rootHandle) {
+			for (const rootHandle of rootHandles.values()) {
 				await ensurePermission(rootHandle, "read");
 			}
 			return buildSnapshot();
 		},
+
+		listDirectory,
 
 		async readFile(filePath) {
 			const handle = await resolveHandle(filePath);
@@ -350,18 +459,18 @@ export function createBrowserProjectBridge(): ProjectBridge | undefined {
 				await writable.write(content);
 				await writable.close();
 			}
-			return buildSnapshot();
+			return createNodeResult(parentPath, joinProjectPath(parentPath, name));
 		},
 
 		async createFolder(parentPath, name) {
 			const parentHandle = await resolveDirectoryHandle(parentPath);
 			await ensurePermission(parentHandle, "readwrite");
 			await parentHandle.getDirectoryHandle(name, { create: true });
-			return buildSnapshot();
+			return createNodeResult(parentPath, joinProjectPath(parentPath, name));
 		},
 
 		async renamePath(targetPath, nextName) {
-			const { name, parentHandle } = await resolveParent(targetPath);
+			const { name, parentHandle, parentPath } = await resolveParent(targetPath);
 			const sourceHandle = await resolveHandle(targetPath);
 			await ensurePermission(parentHandle, "readwrite");
 
@@ -374,17 +483,24 @@ export function createBrowserProjectBridge(): ProjectBridge | undefined {
 			}
 
 			await parentHandle.removeEntry(name, { recursive: sourceHandle.kind === "directory" });
-			return buildSnapshot();
+			return createRenameResult(
+				targetPath,
+				joinProjectPath(parentPath, nextName),
+				parentPath,
+			);
 		},
 
 		async deletePath(targetPath) {
-			const { name, parentHandle } = await resolveParent(targetPath);
+			const { name, parentHandle, parentPath } = await resolveParent(targetPath);
 			const targetHandle = await resolveHandle(targetPath);
 			await ensurePermission(parentHandle, "readwrite");
 			await parentHandle.removeEntry(name, {
 				recursive: targetHandle.kind === "directory",
 			});
-			return buildSnapshot();
+			return {
+				deletedPath: targetPath,
+				parentPath: parentPath ?? null,
+			} satisfies DeleteNodeResult;
 		},
 	};
 }

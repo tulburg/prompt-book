@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld("projectBridge", {
   restoreLastProject: () => ipcRenderer.invoke("project:restore-last"),
   openProjectFolder: () => ipcRenderer.invoke("project:open-folder"),
-  refreshProject: (rootPath: string) => ipcRenderer.invoke("project:refresh", rootPath),
+  refreshProject: () => ipcRenderer.invoke("project:refresh"),
+  listDirectory: (directoryPath: string) =>
+    ipcRenderer.invoke("project:list-directory", directoryPath),
   readFile: (filePath: string) => ipcRenderer.invoke("project:read-file", filePath),
   writeFile: (filePath: string, content: string) =>
     ipcRenderer.invoke("project:write-file", filePath, content),

@@ -1,9 +1,10 @@
 import { FileCode2, FolderOpen, Save } from "lucide-react";
+import { MonacoEditor } from "@/components/editor/MonacoEditor";
 import type { ActiveFileState, ProjectNode, ProjectSnapshot } from "@/lib/project-files";
 import { Button } from "@/ui/lower/Button";
 import { Title } from "../lower/Typography";
 
-interface PromptEditorProps extends React.HTMLAttributes<HTMLDivElement> {
+interface PromptEditorProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
 	project: ProjectSnapshot | null;
 	selectedNode: ProjectNode | null;
 	activeFile: ActiveFileState | null;
@@ -72,12 +73,10 @@ export function PromptEditor({
 								Loading file contents...
 							</div>
 						) : (
-							<textarea
-								value={activeFile.content}
-								onChange={(event) => onChange(event.target.value)}
-								className="h-full w-full resize-none bg-transparent px-5 py-4 font-mono text-[13px] leading-6 text-foreground outline-none"
-								placeholder="Select a file to begin editing."
-								spellCheck={false}
+							<MonacoEditor
+								activeFile={activeFile}
+								onChange={onChange}
+								onSave={onSave}
 							/>
 						)
 					) : (
@@ -114,7 +113,9 @@ export function PromptEditor({
 						<div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
 							Path
 						</div>
-						<div className="break-all">{selectedNode?.path ?? project?.rootPath ?? "N/A"}</div>
+						<div className="break-all">
+							{selectedNode?.path ?? project?.roots[0]?.path ?? "N/A"}
+						</div>
 					</div>
 					<div>
 						<div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">

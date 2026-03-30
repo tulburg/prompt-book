@@ -1,4 +1,5 @@
 export type ProjectNodeKind = "file" | "directory";
+export type ProjectSource = "electron" | "web";
 
 export interface ProjectPermissions {
 	read: boolean;
@@ -11,18 +12,20 @@ export interface ProjectNode {
 	path: string;
 	name: string;
 	kind: ProjectNodeKind;
+	parentPath: string | null;
+	rootPath: string;
 	permissions: ProjectPermissions;
 	size?: number;
 	modifiedAt?: number;
+	childCount?: number;
 	children?: ProjectNode[];
+	isDirectoryResolved?: boolean;
+	isLoading?: boolean;
 }
 
 export interface ProjectSnapshot {
-	rootPath: string;
-	rootName: string;
-	source: "electron" | "web";
-	permissions: ProjectPermissions;
-	tree: ProjectNode;
+	source: ProjectSource;
+	roots: ProjectNode[];
 }
 
 export interface ActiveFileState {
@@ -34,10 +37,34 @@ export interface ActiveFileState {
 	isLoading: boolean;
 }
 
+export interface DirectoryListingResult {
+	path: string;
+	children: ProjectNode[];
+	permissions: ProjectPermissions;
+	modifiedAt?: number;
+}
+
+export interface CreateNodeResult {
+	node: ProjectNode;
+	parentPath: string;
+}
+
+export interface RenameNodeResult {
+	node: ProjectNode;
+	oldPath: string;
+	parentPath: string | null;
+}
+
+export interface DeleteNodeResult {
+	deletedPath: string;
+	parentPath: string | null;
+}
+
 export interface ProjectBridge {
 	restoreLastProject: () => Promise<ProjectSnapshot | null>;
 	openProjectFolder: () => Promise<ProjectSnapshot | null>;
-	refreshProject: (rootPath: string) => Promise<ProjectSnapshot>;
+	refreshProject: () => Promise<ProjectSnapshot>;
+	listDirectory: (directoryPath: string) => Promise<DirectoryListingResult>;
 	readFile: (filePath: string) => Promise<{
 		content: string;
 		permissions: ProjectPermissions;
@@ -49,8 +76,8 @@ export interface ProjectBridge {
 		parentPath: string,
 		name: string,
 		content?: string,
-	) => Promise<ProjectSnapshot>;
-	createFolder: (parentPath: string, name: string) => Promise<ProjectSnapshot>;
-	renamePath: (targetPath: string, nextName: string) => Promise<ProjectSnapshot>;
-	deletePath: (targetPath: string) => Promise<ProjectSnapshot>;
+	) => Promise<CreateNodeResult>;
+	createFolder: (parentPath: string, name: string) => Promise<CreateNodeResult>;
+	renamePath: (targetPath: string, nextName: string) => Promise<RenameNodeResult>;
+	deletePath: (targetPath: string) => Promise<DeleteNodeResult>;
 }

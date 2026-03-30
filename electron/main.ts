@@ -31,7 +31,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 // Store for window state persistence
 const store = new Store({
   defaults: {
-    lastProjectPath: null,
+    lastProjectPaths: [] as string[],
     windowState: {
       width: 1024,
       height: 768,
@@ -43,8 +43,6 @@ const store = new Store({
 });
 
 let win: BrowserWindow | null;
-let isQuitting = false;
-
 interface ProjectPermissions {
   read: boolean;
   write: boolean;
@@ -56,18 +54,20 @@ interface ProjectNode {
   path: string;
   name: string;
   kind: "file" | "directory";
+  parentPath: string | null;
+  rootPath: string;
   permissions: ProjectPermissions;
   size?: number;
   modifiedAt?: number;
+  childCount?: number;
   children?: ProjectNode[];
+  isDirectoryResolved?: boolean;
+  isLoading?: boolean;
 }
 
 interface ProjectSnapshot {
-  rootPath: string;
-  rootName: string;
   source: "electron";
-  permissions: ProjectPermissions;
-  tree: ProjectNode;
+  roots: ProjectNode[];
 }
 
 async function getPermissions(targetPath: string): Promise<ProjectPermissions> {
@@ -111,7 +111,11 @@ async function getPermissions(targetPath: string): Promise<ProjectPermissions> {
   };
 }
 
-async function buildProjectNode(targetPath: string): Promise<ProjectNode> {
+async function buildProjectNode(
+  targetPath: string,
+  parentPath: string | null,
+  rootPath: string,
+): Promise<ProjectNode> {
   const stats = await fs.stat(targetPath);
   const permissions = await getPermissions(targetPath);
   const kind = stats.isDirectory() ? "directory" : "file";
@@ -121,59 +125,81 @@ async function buildProjectNode(targetPath: string): Promise<ProjectNode> {
       path: targetPath,
       name: path.basename(targetPath),
       kind,
+      parentPath,
+      rootPath,
       permissions,
       modifiedAt: stats.mtimeMs,
       size: stats.size,
     };
   }
 
-  const children: ProjectNode[] = [];
-  if (permissions.read) {
-    const entries = await fs.readdir(targetPath);
-    const sortedEntries = entries.sort((left, right) =>
-      left.localeCompare(right),
-    );
-
-    for (const entry of sortedEntries) {
-      const entryPath = path.join(targetPath, entry);
-      try {
-        children.push(await buildProjectNode(entryPath));
-      } catch {
-        // Skip entries that become unavailable while refreshing the tree.
-      }
-    }
-  }
-
-  children.sort((left, right) => {
-    if (left.kind !== right.kind) {
-      return left.kind === "directory" ? -1 : 1;
-    }
-    return left.name.localeCompare(right.name);
-  });
-
   return {
     path: targetPath,
     name: path.basename(targetPath),
     kind,
+    parentPath,
+    rootPath,
     permissions,
     modifiedAt: stats.mtimeMs,
-    children,
+    isDirectoryResolved: false,
   };
 }
 
-async function buildProjectSnapshot(rootPath: string): Promise<ProjectSnapshot> {
-  const tree = await buildProjectNode(rootPath);
-  if (tree.kind !== "directory") {
-    throw new Error("Projects must start from a folder.");
+function dedupeRootPaths(rootPaths: string[]) {
+  return [...new Set(rootPaths)];
+}
+
+async function buildProjectSnapshot(rootPaths: string[]): Promise<ProjectSnapshot> {
+  const roots: ProjectNode[] = [];
+  for (const rootPath of dedupeRootPaths(rootPaths)) {
+    const rootNode = await buildProjectNode(rootPath, null, rootPath);
+    if (rootNode.kind !== "directory") {
+      throw new Error("Projects must start from a folder.");
+    }
+    roots.push(rootNode);
   }
 
   return {
-    rootPath,
-    rootName: path.basename(rootPath),
     source: "electron",
-    permissions: await getPermissions(rootPath),
-    tree,
+    roots,
   };
+}
+
+function sortNodes(left: ProjectNode, right: ProjectNode) {
+  if (left.kind !== right.kind) {
+    return left.kind === "directory" ? -1 : 1;
+  }
+  return left.name.localeCompare(right.name);
+}
+
+function getStoredRootPaths() {
+  const storedValue = store.get("lastProjectPaths");
+  if (!Array.isArray(storedValue)) {
+    return [];
+  }
+
+  return storedValue.filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function setStoredRootPaths(rootPaths: string[]) {
+  store.set("lastProjectPaths", dedupeRootPaths(rootPaths));
+}
+
+function findRootPath(targetPath: string, rootPaths: string[]) {
+  return rootPaths
+    .slice()
+    .sort((left, right) => right.length - left.length)
+    .find((rootPath) => targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`));
+}
+
+async function listDirectoryChildren(directoryPath: string, rootPath: string): Promise<ProjectNode[]> {
+  const entries = await fs.readdir(directoryPath);
+  const children = await Promise.all(
+    entries
+      .sort((left, right) => left.localeCompare(right))
+      .map(async (entry) => buildProjectNode(path.join(directoryPath, entry), directoryPath, rootPath)),
+  );
+  return children.sort(sortNodes);
 }
 
 async function ensureWritable(targetPath: string, message: string) {
@@ -218,12 +244,10 @@ function createWindow() {
     }
   }
 
-  // Restore maximized state
-  if (savedState.isMaximized) {
-    options.maximized = true;
-  }
-
   win = new BrowserWindow(options);
+  if (savedState.isMaximized) {
+    win.maximize();
+  }
 
   // Save window state before close
   win.on("resize", () => {
@@ -286,39 +310,85 @@ function saveWindowState() {
 }
 
 ipcMain.handle("project:restore-last", async () => {
-  const lastProjectPath = store.get("lastProjectPath");
-  if (typeof lastProjectPath !== "string" || !lastProjectPath) {
+  const rootPaths = getStoredRootPaths();
+  if (rootPaths.length === 0) {
     return null;
   }
 
   try {
-    await ensurePathExists(lastProjectPath);
-    return await buildProjectSnapshot(lastProjectPath);
+    const validRootPaths: string[] = [];
+    for (const rootPath of rootPaths) {
+      try {
+        await ensurePathExists(rootPath);
+        validRootPaths.push(rootPath);
+      } catch {
+        // Skip missing roots and clean them up below.
+      }
+    }
+
+    if (validRootPaths.length === 0) {
+      setStoredRootPaths([]);
+      return null;
+    }
+
+    setStoredRootPaths(validRootPaths);
+    return await buildProjectSnapshot(validRootPaths);
   } catch {
-    store.set("lastProjectPath", null);
+    setStoredRootPaths([]);
     return null;
   }
 });
 
 ipcMain.handle("project:open-folder", async () => {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? win ?? undefined;
-  const result = await dialog.showOpenDialog(targetWindow, {
-    properties: ["openDirectory"],
-  });
+  const result = targetWindow
+    ? await dialog.showOpenDialog(targetWindow, {
+        properties: ["openDirectory", "multiSelections"],
+      })
+    : await dialog.showOpenDialog({
+        properties: ["openDirectory", "multiSelections"],
+      });
 
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
 
-  const rootPath = result.filePaths[0];
-  store.set("lastProjectPath", rootPath);
-  return buildProjectSnapshot(rootPath);
+  const nextRootPaths = dedupeRootPaths([
+    ...getStoredRootPaths(),
+    ...result.filePaths,
+  ]);
+  setStoredRootPaths(nextRootPaths);
+  return buildProjectSnapshot(nextRootPaths);
 });
 
-ipcMain.handle("project:refresh", async (_event, rootPath: string) => {
-  await ensurePathExists(rootPath);
-  store.set("lastProjectPath", rootPath);
-  return buildProjectSnapshot(rootPath);
+ ipcMain.handle("project:refresh", async () => {
+  const rootPaths = getStoredRootPaths();
+  for (const rootPath of rootPaths) {
+    await ensurePathExists(rootPath);
+  }
+  setStoredRootPaths(rootPaths);
+  return buildProjectSnapshot(rootPaths);
+});
+
+ipcMain.handle("project:list-directory", async (_event, directoryPath: string) => {
+  await ensurePathExists(directoryPath);
+  const rootPath = findRootPath(directoryPath, getStoredRootPaths());
+  if (!rootPath) {
+    throw new Error(`No workspace root found for: ${directoryPath}`);
+  }
+
+  const permissions = await getPermissions(directoryPath);
+  if (!permissions.read) {
+    throw new Error("You do not have permission to read this folder.");
+  }
+
+  const stats = await fs.stat(directoryPath);
+  return {
+    path: directoryPath,
+    children: await listDirectoryChildren(directoryPath, rootPath),
+    permissions,
+    modifiedAt: stats.mtimeMs,
+  };
 });
 
 ipcMain.handle("project:read-file", async (_event, filePath: string) => {
@@ -357,11 +427,14 @@ ipcMain.handle(
 
     const targetPath = path.join(parentPath, name);
     await fs.writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
-
-    const rootPath = store.get("lastProjectPath");
-    return buildProjectSnapshot(
-      typeof rootPath === "string" && rootPath ? rootPath : parentPath,
-    );
+    const rootPath = findRootPath(parentPath, getStoredRootPaths());
+    if (!rootPath) {
+      throw new Error(`No workspace root found for: ${parentPath}`);
+    }
+    return {
+      parentPath,
+      node: await buildProjectNode(targetPath, parentPath, rootPath),
+    };
   },
 );
 
@@ -374,11 +447,14 @@ ipcMain.handle("project:create-folder", async (_event, parentPath: string, name:
 
   const targetPath = path.join(parentPath, name);
   await fs.mkdir(targetPath, { recursive: false });
-
-  const rootPath = store.get("lastProjectPath");
-  return buildProjectSnapshot(
-    typeof rootPath === "string" && rootPath ? rootPath : parentPath,
-  );
+  const rootPath = findRootPath(parentPath, getStoredRootPaths());
+  if (!rootPath) {
+    throw new Error(`No workspace root found for: ${parentPath}`);
+  }
+  return {
+    parentPath,
+    node: await buildProjectNode(targetPath, parentPath, rootPath),
+  };
 });
 
 ipcMain.handle("project:rename-path", async (_event, targetPath: string, nextName: string) => {
@@ -391,11 +467,15 @@ ipcMain.handle("project:rename-path", async (_event, targetPath: string, nextNam
 
   const renamedPath = path.join(parentPath, nextName);
   await fs.rename(targetPath, renamedPath);
-
-  const rootPath = store.get("lastProjectPath");
-  return buildProjectSnapshot(
-    typeof rootPath === "string" && rootPath ? rootPath : parentPath,
-  );
+  const rootPath = findRootPath(parentPath, getStoredRootPaths());
+  if (!rootPath) {
+    throw new Error(`No workspace root found for: ${parentPath}`);
+  }
+  return {
+    oldPath: targetPath,
+    parentPath,
+    node: await buildProjectNode(renamedPath, parentPath, rootPath),
+  };
 });
 
 ipcMain.handle("project:delete-path", async (_event, targetPath: string) => {
@@ -407,11 +487,10 @@ ipcMain.handle("project:delete-path", async (_event, targetPath: string) => {
   );
 
   await fs.rm(targetPath, { recursive: true, force: false });
-
-  const rootPath = store.get("lastProjectPath");
-  return buildProjectSnapshot(
-    typeof rootPath === "string" && rootPath ? rootPath : parentPath,
-  );
+  return {
+    deletedPath: targetPath,
+    parentPath,
+  };
 });
 
 // Save window state before quitting
