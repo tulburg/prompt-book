@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld("projectBridge", {
     ipcRenderer.invoke("project:rename-path", targetPath, nextName),
   deletePath: (targetPath: string) =>
     ipcRenderer.invoke("project:delete-path", targetPath),
+  movePath: (sourcePath: string, targetDirectoryPath: string) =>
+    ipcRenderer.invoke("project:move-path", sourcePath, targetDirectoryPath),
   gitStatus: (rootPath: string) =>
     ipcRenderer.invoke("git:status", rootPath),
 })

@@ -91,5 +91,6 @@ export interface ProjectBridge {
 	createFolder: (parentPath: string, name: string) => Promise<CreateNodeResult>;
 	renamePath: (targetPath: string, nextName: string) => Promise<RenameNodeResult>;
 	deletePath: (targetPath: string) => Promise<DeleteNodeResult>;
+	movePath?: (sourcePath: string, targetDirectoryPath: string) => Promise<RenameNodeResult>;
 	gitStatus?: (rootPath: string) => Promise<GitStatusMap | null>;
 }

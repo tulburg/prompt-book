@@ -1,19 +1,40 @@
 import {
 	ChevronDown,
 	ChevronRight,
-	File,
 	FilePlus,
 	Folder,
 	FolderOpen,
 	FolderPlus,
 	Pencil,
 	RefreshCw,
+	Search,
 	Trash2,
+	X,
 } from "lucide-react";
 import * as React from "react";
 import type { NativeContextMenuItem } from "@/lib/native-context-menu";
 import type { GitFileStatus, GitStatusMap, ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
+import { injectSetiFont, resolveFileIcon, toSetiGlyph } from "@/extensions/theme-seti/file-icons";
 import { Button } from "@/ui/lower/Button";
+
+const HIDDEN_ENTRIES = new Set([
+	".git",
+	".svn",
+	".hg",
+	".DS_Store",
+	"node_modules",
+	"__pycache__",
+	".next",
+	".nuxt",
+	".turbo",
+	"dist",
+	"dist-electron",
+	".cache",
+	".parcel-cache",
+	"coverage",
+	".env.local",
+	"Thumbs.db",
+]);
 
 const GIT_STATUS_COLORS: Record<GitFileStatus, string> = {
 	modified: "text-yellow-400",
@@ -50,6 +71,45 @@ function getDirectoryGitStatus(
 	return "modified";
 }
 
+function matchesFilter(node: ProjectNode, filter: string): boolean {
+	if (!filter) return true;
+	const lower = filter.toLowerCase();
+	if (node.name.toLowerCase().includes(lower)) return true;
+	if (node.kind === "directory" && node.children) {
+		return node.children.some((child) => matchesFilter(child, filter));
+	}
+	return false;
+}
+
+function isHidden(name: string): boolean {
+	return HIDDEN_ENTRIES.has(name);
+}
+
+function FileIcon({ fileName }: { fileName: string }) {
+	const icon = resolveFileIcon(fileName, false);
+	if (!icon) return null;
+	const glyph = toSetiGlyph(icon.character);
+
+	if (!glyph) {
+		return null;
+	}
+
+	return (
+		<span
+			className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
+			style={{
+				fontFamily: "seti",
+				fontSize: "16px",
+				color: icon.color,
+				lineHeight: 1,
+				WebkitFontSmoothing: "antialiased",
+			}}
+		>
+			{glyph}
+		</span>
+	);
+}
+
 interface PendingCreateState {
 	parentPath: string;
 	kind: ProjectNodeKind;
@@ -58,6 +118,7 @@ interface PendingCreateState {
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	project: ProjectSnapshot | null;
 	selectedPath: string | null;
+	activeFilePath: string | null;
 	expandedPaths: Set<string>;
 	pendingCreate: PendingCreateState | null;
 	renamingPath: string | null;
@@ -72,8 +133,10 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	onBeginRename: (targetPath: string) => void;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
+	onMoveNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
 	onCancelInlineState: () => void;
 	onSelectNode: (node: ProjectNode) => void;
+	onRevealPath: (targetPath: string) => void;
 }
 
 interface ContextMenuState {
@@ -163,13 +226,16 @@ function InlineNameForm({
 function ProjectTree({
 	depth = 0,
 	expandedPaths,
+	filter,
 	gitStatus,
 	node,
+	activeFilePath,
 	onBeginCreate,
 	onBeginRename,
 	onCancelInlineState,
 	onCreateNode,
 	onDeleteNode,
+	onMoveNode,
 	onOpenNode,
 	onRenameNode,
 	onSelectNode,
@@ -180,13 +246,16 @@ function ProjectTree({
 }: {
 	depth?: number;
 	expandedPaths: Set<string>;
+	filter: string;
 	gitStatus: GitStatusMap;
 	node: ProjectNode;
+	activeFilePath: string | null;
 	onBeginCreate: (kind: ProjectNodeKind, targetPath?: string) => void;
 	onBeginRename: (targetPath: string) => void;
 	onCancelInlineState: () => void;
 	onCreateNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
+	onMoveNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onSelectNode: (node: ProjectNode) => void;
@@ -198,22 +267,73 @@ function ProjectTree({
 	const isDirectory = node.kind === "directory";
 	const isExpanded = expandedPaths.has(node.path);
 	const isSelected = selectedPath === node.path;
+	const isActiveFile = activeFilePath === node.path;
 	const isRenaming = renamingPath === node.path;
 	const showInlineCreate = pendingCreate?.parentPath === node.path && isDirectory;
-	const Icon = isDirectory ? (isExpanded ? FolderOpen : Folder) : File;
 
 	const fileGitStatus = gitStatus[node.path] as GitFileStatus | undefined;
 	const dirGitStatus = isDirectory ? getDirectoryGitStatus(node, gitStatus) : null;
 	const effectiveGitStatus = fileGitStatus ?? dirGitStatus;
 	const gitColorClass = effectiveGitStatus ? GIT_STATUS_COLORS[effectiveGitStatus] : "";
 
+	const fileIcon = !isDirectory ? resolveFileIcon(node.name, false) : null;
+
+	const handleDragStart = React.useCallback(
+		(event: React.DragEvent) => {
+			event.dataTransfer.setData("text/plain", node.path);
+			event.dataTransfer.effectAllowed = "move";
+		},
+		[node.path],
+	);
+
+	const handleDragOver = React.useCallback(
+		(event: React.DragEvent) => {
+			if (!isDirectory) return;
+			event.preventDefault();
+			event.dataTransfer.dropEffect = "move";
+		},
+		[isDirectory],
+	);
+
+	const handleDrop = React.useCallback(
+		(event: React.DragEvent) => {
+			event.preventDefault();
+			const sourcePath = event.dataTransfer.getData("text/plain");
+			if (!sourcePath || sourcePath === node.path) return;
+			if (node.path.startsWith(`${sourcePath}/`)) return;
+
+			const targetDir = isDirectory ? node.path : node.parentPath;
+			if (targetDir && sourcePath !== targetDir) {
+				void onMoveNode(sourcePath, targetDir);
+			}
+		},
+		[isDirectory, node.parentPath, node.path, onMoveNode],
+	);
+
+	const visibleChildren = React.useMemo(() => {
+		if (!isDirectory || !node.children) return [];
+		return node.children.filter((child) => {
+			if (isHidden(child.name)) return false;
+			if (filter && !matchesFilter(child, filter)) return false;
+			return true;
+		});
+	}, [isDirectory, node.children, filter]);
+
 	return (
 		<div>
 			<div
 				className={`group flex items-center gap-2 rounded-md px-2 py-1 text-sm ${
-					isSelected ? "bg-sky-500/10 text-sky-100" : "text-foreground/85 hover:bg-panel-600"
+					isActiveFile
+						? "bg-sky-500/15 text-sky-100"
+						: isSelected
+							? "bg-sky-500/10 text-sky-100"
+							: "text-foreground/85 hover:bg-panel-600"
 				}`}
 				style={{ paddingLeft: `${depth * 14 + 8}px` }}
+				draggable={!!node.parentPath}
+				onDragStart={handleDragStart}
+				onDragOver={handleDragOver}
+				onDrop={handleDrop}
 			>
 				{isRenaming ? (
 					<div className="flex min-w-0 flex-1 items-center gap-2">
@@ -226,7 +346,11 @@ function ProjectTree({
 								)
 							) : null}
 						</span>
-						<Icon className="h-4 w-4 shrink-0" />
+						{isDirectory ? (
+							isExpanded ? <FolderOpen className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />
+						) : (
+							fileIcon ? <FileIcon fileName={node.name} /> : <span className="h-4 w-4 shrink-0" />
+						)}
 						<InlineNameForm
 							initialValue={node.name}
 							label="Rename"
@@ -260,8 +384,16 @@ function ProjectTree({
 								)
 							) : null}
 						</span>
-						<Icon className={`h-4 w-4 shrink-0 ${isDirectory && dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
-						<span className={`truncate ${gitColorClass}`}>{node.name}</span>
+						{isDirectory ? (
+							isExpanded ? (
+								<FolderOpen className={`h-4 w-4 shrink-0 ${dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
+							) : (
+								<Folder className={`h-4 w-4 shrink-0 ${dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
+							)
+						) : (
+							<FileIcon fileName={node.name} />
+						)}
+						<span className={`min-w-0 flex-1 truncate ${gitColorClass}`}>{node.name}</span>
 						{fileGitStatus ? (
 							<span className={`ml-auto shrink-0 text-[10px] font-semibold ${GIT_STATUS_COLORS[fileGitStatus]}`}>
 								{GIT_STATUS_LABELS[fileGitStatus]}
@@ -286,18 +418,21 @@ function ProjectTree({
 							Loading...
 						</div>
 					) : null}
-					{node.children?.map((child) => (
+					{visibleChildren.map((child) => (
 						<ProjectTree
 							key={child.path}
 							depth={depth + 1}
 							expandedPaths={expandedPaths}
+							filter={filter}
 							gitStatus={gitStatus}
 							node={child}
+							activeFilePath={activeFilePath}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}
 							onCancelInlineState={onCancelInlineState}
 							onCreateNode={onCreateNode}
 							onDeleteNode={onDeleteNode}
+							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
@@ -336,15 +471,18 @@ export function Sidebar({
 	expandedPaths,
 	gitStatus,
 	isBusy,
+	activeFilePath,
 	onBeginCreate,
 	onBeginRename,
 	onCancelInlineState,
 	onCreateNode,
 	onDeleteNode,
+	onMoveNode,
 	onOpenNode,
 	onOpenProjectFolder,
 	onRefresh,
 	onRenameNode,
+	onRevealPath,
 	onSelectNode,
 	pendingCreate,
 	project,
@@ -352,10 +490,31 @@ export function Sidebar({
 	selectedPath,
 }: SidebarProps) {
 	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
+	const [filter, setFilter] = React.useState("");
+	const [showSearch, setShowSearch] = React.useState(false);
+	const searchInputRef = React.useRef<HTMLInputElement>(null);
 	const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 	const canRenameOrDelete = Boolean(
 		contextMenu?.node && contextMenu.node.parentPath,
 	);
+
+	React.useEffect(() => {
+		injectSetiFont();
+	}, []);
+
+	React.useEffect(() => {
+		if (activeFilePath && project) {
+			onRevealPath(activeFilePath);
+		}
+	}, [activeFilePath, onRevealPath, project]);
+
+	React.useEffect(() => {
+		if (showSearch) {
+			searchInputRef.current?.focus();
+		} else {
+			setFilter("");
+		}
+	}, [showSearch]);
 
 	React.useEffect(() => {
 		if (!contextMenu) {
@@ -492,6 +651,16 @@ export function Sidebar({
 						size="icon"
 						variant="ghost"
 						className="h-8 w-8"
+						aria-label="Search files"
+						disabled={!project}
+						onClick={() => setShowSearch((s) => !s)}
+					>
+						<Search className="h-4 w-4" />
+					</Button>
+					<Button
+						size="icon"
+						variant="ghost"
+						className="h-8 w-8"
 						aria-label="Refresh project"
 						disabled={!project || isBusy}
 						onClick={() => void onRefresh()}
@@ -500,6 +669,33 @@ export function Sidebar({
 					</Button>
 				</div>
 			</div>
+
+			{showSearch ? (
+				<div className="flex items-center gap-2 border-b border-border-500 px-3 py-2">
+					<Search className="h-3.5 w-3.5 shrink-0 text-foreground/40" />
+					<input
+						ref={searchInputRef}
+						value={filter}
+						onChange={(e) => setFilter(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Escape") {
+								setShowSearch(false);
+							}
+						}}
+						className="h-6 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-foreground/35"
+						placeholder="Filter files..."
+					/>
+					{filter ? (
+						<button
+							type="button"
+							onClick={() => setFilter("")}
+							className="shrink-0 text-foreground/40 hover:text-foreground/70"
+						>
+							<X className="h-3.5 w-3.5" />
+						</button>
+					) : null}
+				</div>
+			) : null}
 
 			{error ? (
 				<div className="border-b border-border-500 bg-destructive/10 px-4 py-2 text-xs text-foreground/80">
@@ -513,13 +709,16 @@ export function Sidebar({
 						<ProjectTree
 							key={root.path}
 							expandedPaths={expandedPaths}
+							filter={filter}
 							gitStatus={gitStatus}
 							node={root}
+							activeFilePath={activeFilePath}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}
 							onCancelInlineState={onCancelInlineState}
 							onCreateNode={onCreateNode}
 							onDeleteNode={onDeleteNode}
+							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}

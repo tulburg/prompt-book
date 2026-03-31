@@ -480,6 +480,40 @@ ipcMain.handle("project:rename-path", async (_event, targetPath: string, nextNam
   };
 });
 
+ipcMain.handle("project:move-path", async (_event, sourcePath: string, targetDirectoryPath: string) => {
+  await ensurePathExists(sourcePath);
+  await ensurePathExists(targetDirectoryPath);
+  await ensureWritable(
+    path.dirname(sourcePath),
+    "You do not have permission to move items from this location.",
+  );
+  await ensureWritable(
+    targetDirectoryPath,
+    "You do not have permission to move items to this location.",
+  );
+
+  const name = path.basename(sourcePath);
+  const destinationPath = path.join(targetDirectoryPath, name);
+
+  try {
+    await fs.access(destinationPath, fsConstants.F_OK);
+    throw new Error(`An item named "${name}" already exists in the destination.`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+
+  await fs.rename(sourcePath, destinationPath);
+  const rootPath = findRootPath(targetDirectoryPath, getStoredRootPaths());
+  if (!rootPath) {
+    throw new Error(`No workspace root found for: ${targetDirectoryPath}`);
+  }
+  return {
+    oldPath: sourcePath,
+    parentPath: targetDirectoryPath,
+    node: await buildProjectNode(destinationPath, targetDirectoryPath, rootPath),
+  };
+});
+
 ipcMain.handle("project:delete-path", async (_event, targetPath: string) => {
   await ensurePathExists(targetPath);
   const parentPath = path.dirname(targetPath);

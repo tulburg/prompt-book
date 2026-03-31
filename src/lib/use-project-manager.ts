@@ -698,6 +698,86 @@ export function useProjectManager() {
 		[activeFile?.path, loadDirectory, project, projectBridge, renamingPath, setError],
 	);
 
+	const moveNode = React.useCallback(
+		async (sourcePath: string, targetDirectoryPath: string) => {
+			if (!projectBridge?.movePath || !project) {
+				return;
+			}
+
+			setIsBusy(true);
+			setError(null);
+			try {
+				const result = await projectBridge.movePath(sourcePath, targetDirectoryPath);
+				const nextPath = result.node.path;
+
+				renameModels(sourcePath, nextPath);
+				setProject((current) =>
+					current
+						? {
+								...current,
+								roots: remapTreePaths(
+									removeNodeFromTree(current.roots, sourcePath),
+									sourcePath,
+									nextPath,
+								),
+							}
+						: current,
+				);
+				setExpandedPaths((current) => {
+					const next = remapPathSet(current, sourcePath, nextPath);
+					next.add(targetDirectoryPath);
+					return next;
+				});
+				setSelectedPath(nextPath);
+
+				if (activeFile?.path && isSameOrDescendantPath(activeFile.path, sourcePath)) {
+					const nextActivePath = activeFile.path.replace(sourcePath, nextPath);
+					setActiveFile((current) =>
+						current
+							? { ...current, path: nextActivePath }
+							: current,
+					);
+				}
+
+				const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
+				if (sourceParent) {
+					await loadDirectory(sourceParent);
+				}
+				await loadDirectory(targetDirectoryPath);
+			} catch (moveError) {
+				setError(
+					moveError instanceof Error
+						? moveError.message
+						: "Failed to move the selected item.",
+				);
+			} finally {
+				setIsBusy(false);
+			}
+		},
+		[activeFile?.path, loadDirectory, project, projectBridge, setError],
+	);
+
+	const revealPath = React.useCallback(
+		(targetPath: string) => {
+			if (!project) return;
+
+			const root = project.roots.find(
+				(r) => targetPath === r.path || targetPath.startsWith(`${r.path}/`),
+			);
+			if (!root) return;
+
+			setExpandedPaths((current) => {
+				const nextExpanded = new Set(current);
+				for (const ancestor of getAncestorPaths(targetPath, root.path)) {
+					nextExpanded.add(ancestor);
+				}
+				return nextExpanded;
+			});
+			setSelectedPath(targetPath);
+		},
+		[project],
+	);
+
 	const deleteNode = React.useCallback(
 		async (targetPath: string) => {
 			if (!projectBridge || !project) {
@@ -762,8 +842,10 @@ export function useProjectManager() {
 		expandedPaths,
 		isBootstrapping,
 		isBusy,
+		moveNode,
 		openNode,
 		projectBridge,
+		revealPath,
 		selectNode,
 		openProjectFolder,
 		pendingCreate,

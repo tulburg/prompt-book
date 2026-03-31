@@ -37,6 +37,7 @@ export default function App() {
                   defaultSize: 12,
                   children: (
                     <Sidebar
+                      activeFilePath={projectManager.activeFile?.path ?? null}
                       error={projectManager.error}
                       expandedPaths={projectManager.expandedPaths}
                       gitStatus={gitStatus}
@@ -49,10 +50,12 @@ export default function App() {
                       }}
                       onCreateNode={projectManager.createNode}
                       onDeleteNode={projectManager.deleteNode}
+                      onMoveNode={projectManager.moveNode}
                       onOpenNode={projectManager.openNode}
                       onOpenProjectFolder={projectManager.openProjectFolder}
                       onRefresh={() => projectManager.refreshProject()}
                       onRenameNode={projectManager.renameNode}
+                      onRevealPath={projectManager.revealPath}
                       onSelectNode={projectManager.selectNode}
                       pendingCreate={projectManager.pendingCreate}
                       project={projectManager.project}
