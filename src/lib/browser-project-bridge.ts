@@ -469,6 +469,43 @@ export function createBrowserProjectBridge(): ProjectBridge | undefined {
 			return createNodeResult(parentPath, joinProjectPath(parentPath, name));
 		},
 
+		async copyPath(sourcePath, targetDirectoryPath) {
+			const sourceHandle = await resolveHandle(sourcePath);
+			const targetParent = await resolveDirectoryHandle(targetDirectoryPath);
+			await ensurePermission(targetParent, "readwrite");
+
+			const sourceName =
+				sourcePath.split("/").filter(Boolean).at(-1) ?? "copy";
+			const lastDot = sourceName.lastIndexOf(".");
+			const hasExtension = sourceHandle.kind === "file" && lastDot > 0;
+			const baseName = hasExtension ? sourceName.slice(0, lastDot) : sourceName;
+			const extension = hasExtension ? sourceName.slice(lastDot) : "";
+
+			let attempt = 0;
+			let nextName = "";
+
+			while (attempt < 1000) {
+				const suffix = attempt === 0 ? " copy" : ` copy ${attempt + 1}`;
+				nextName = `${baseName}${suffix}${extension}`;
+				try {
+					await resolveHandle(joinProjectPath(targetDirectoryPath, nextName));
+					attempt += 1;
+				} catch {
+					break;
+				}
+			}
+
+			if (isBrowserDirectoryHandle(sourceHandle)) {
+				await copyDirectoryHandle(sourceHandle, targetParent, nextName);
+			} else if (isBrowserFileHandle(sourceHandle)) {
+				await copyFileHandle(sourceHandle, targetParent, nextName);
+			} else {
+				throw new Error("Unsupported file system handle.");
+			}
+
+			return createNodeResult(targetDirectoryPath, joinProjectPath(targetDirectoryPath, nextName));
+		},
+
 		async renamePath(targetPath, nextName) {
 			const { name, parentHandle, parentPath } = await resolveParent(targetPath);
 			const sourceHandle = await resolveHandle(targetPath);

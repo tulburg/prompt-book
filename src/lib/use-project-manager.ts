@@ -628,6 +628,32 @@ export function useProjectManager() {
 		[loadDirectory, pendingCreate, projectBridge, setError],
 	);
 
+	const copyNode = React.useCallback(
+		async (sourcePath: string, targetDirectoryPath: string) => {
+			if (!projectBridge?.copyPath) {
+				return;
+			}
+
+			setIsBusy(true);
+			setError(null);
+			try {
+				const result = await projectBridge.copyPath(sourcePath, targetDirectoryPath);
+				await loadDirectory(result.parentPath);
+				setExpandedPaths((current) => new Set(current).add(result.parentPath));
+				setSelectedPath(result.node.path);
+			} catch (copyError) {
+				setError(
+					copyError instanceof Error
+						? copyError.message
+						: "Failed to copy the selected item.",
+				);
+			} finally {
+				setIsBusy(false);
+			}
+		},
+		[loadDirectory, projectBridge, setError],
+	);
+
 	const beginRename = React.useCallback((targetPath: string) => {
 		setPendingCreate(null);
 		setRenamingPath(targetPath);
@@ -836,6 +862,7 @@ export function useProjectManager() {
 		activeFile,
 		beginCreate,
 		beginRename,
+		copyNode,
 		createNode,
 		deleteNode,
 		error,

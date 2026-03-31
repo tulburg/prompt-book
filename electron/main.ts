@@ -219,6 +219,36 @@ async function ensurePathExists(targetPath: string) {
   }
 }
 
+async function pathExists(targetPath: string) {
+  try {
+    await fs.access(targetPath, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getAvailableCopyPath(targetDirectoryPath: string, sourceName: string) {
+  const parsed = path.parse(sourceName);
+  const baseName = parsed.ext ? parsed.name : sourceName;
+  const extension = parsed.ext;
+  let attempt = 0;
+
+  while (attempt < 1000) {
+    const suffix = attempt === 0 ? " copy" : ` copy ${attempt + 1}`;
+    const candidateName = `${baseName}${suffix}${extension}`;
+    const candidatePath = path.join(targetDirectoryPath, candidateName);
+
+    if (!(await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+
+    attempt += 1;
+  }
+
+  throw new Error("Unable to determine a destination for the copied item.");
+}
+
 function createWindow() {
   const savedState = store.get("windowState");
 
@@ -456,6 +486,29 @@ ipcMain.handle("project:create-folder", async (_event, parentPath: string, name:
   return {
     parentPath,
     node: await buildProjectNode(targetPath, parentPath, rootPath),
+  };
+});
+
+ipcMain.handle("project:copy-path", async (_event, sourcePath: string, targetDirectoryPath: string) => {
+  await ensurePathExists(sourcePath);
+  await ensurePathExists(targetDirectoryPath);
+  await ensureWritable(
+    targetDirectoryPath,
+    "You do not have permission to paste items into this location.",
+  );
+
+  const sourceName = path.basename(sourcePath);
+  const destinationPath = await getAvailableCopyPath(targetDirectoryPath, sourceName);
+
+  await fs.cp(sourcePath, destinationPath, { recursive: true, errorOnExist: true });
+  const rootPath = findRootPath(targetDirectoryPath, getStoredRootPaths());
+  if (!rootPath) {
+    throw new Error(`No workspace root found for: ${targetDirectoryPath}`);
+  }
+
+  return {
+    parentPath: targetDirectoryPath,
+    node: await buildProjectNode(destinationPath, targetDirectoryPath, rootPath),
   };
 });
 

@@ -1,8 +1,9 @@
 import {
+	ArrowUpDown,
 	ChevronDown,
 	ChevronRight,
+	Copy,
 	FilePlus,
-	Folder,
 	FolderOpen,
 	FolderPlus,
 	Pencil,
@@ -12,9 +13,16 @@ import {
 	X,
 } from "lucide-react";
 import * as React from "react";
+import { injectSetiFont, resolveFileIcon, toSetiGlyph } from "@/extensions/theme-seti/file-icons";
 import type { NativeContextMenuItem } from "@/lib/native-context-menu";
 import type { GitFileStatus, GitStatusMap, ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
-import { injectSetiFont, resolveFileIcon, toSetiGlyph } from "@/extensions/theme-seti/file-icons";
+import {
+	buildSidebarTree,
+	flattenSidebarTree,
+	matchesViewPath,
+	type SidebarSortOrder,
+	type SidebarViewNode,
+} from "@/lib/sidebar-tree";
 import { Button } from "@/ui/lower/Button";
 
 const HIDDEN_ENTRIES = new Set([
@@ -35,6 +43,14 @@ const HIDDEN_ENTRIES = new Set([
 	".env.local",
 	"Thumbs.db",
 ]);
+const SORT_ORDER_STORAGE_KEY = "prompt-book-sidebar-sort-order";
+const TREE_INDENT_PX = 7;
+const SORT_OPTIONS: Array<{ value: SidebarSortOrder; label: string }> = [
+	{ value: "default", label: "Default" },
+	{ value: "files-first", label: "Files First" },
+	{ value: "type", label: "Type" },
+	{ value: "modified", label: "Modified" },
+];
 
 const GIT_STATUS_COLORS: Record<GitFileStatus, string> = {
 	modified: "text-yellow-400",
@@ -60,36 +76,23 @@ function getDirectoryGitStatus(
 	node: ProjectNode,
 	gitStatus: GitStatusMap,
 ): GitFileStatus | null {
-	if (node.kind !== "directory") return null;
+	if (node.kind !== "directory") {
+		return null;
+	}
 
 	const prefix = node.path.endsWith("/") ? node.path : `${node.path}/`;
-	const childStatuses = Object.keys(gitStatus).filter(
-		(p) => p.startsWith(prefix),
-	);
-
-	if (childStatuses.length === 0) return null;
-	return "modified";
-}
-
-function matchesFilter(node: ProjectNode, filter: string): boolean {
-	if (!filter) return true;
-	const lower = filter.toLowerCase();
-	if (node.name.toLowerCase().includes(lower)) return true;
-	if (node.kind === "directory" && node.children) {
-		return node.children.some((child) => matchesFilter(child, filter));
-	}
-	return false;
-}
-
-function isHidden(name: string): boolean {
-	return HIDDEN_ENTRIES.has(name);
+	return Object.keys(gitStatus).some((path) => path.startsWith(prefix))
+		? "modified"
+		: null;
 }
 
 function FileIcon({ fileName }: { fileName: string }) {
 	const icon = resolveFileIcon(fileName, false);
-	if (!icon) return null;
-	const glyph = toSetiGlyph(icon.character);
+	if (!icon) {
+		return null;
+	}
 
+	const glyph = toSetiGlyph(icon.character);
 	if (!glyph) {
 		return null;
 	}
@@ -130,6 +133,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
 	onBeginCreate: (kind: ProjectNodeKind, targetPath?: string) => void;
 	onCreateNode: (name: string) => void | Promise<void>;
+	onCopyNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
 	onBeginRename: (targetPath: string) => void;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
@@ -140,12 +144,23 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 interface ContextMenuState {
-	node: ProjectNode;
+	node: SidebarViewNode;
 	x: number;
 	y: number;
 }
 
-function buildContextMenuItems(node: ProjectNode): NativeContextMenuItem[] {
+function getPasteTargetDirectory(node: SidebarViewNode | null) {
+	if (!node) {
+		return null;
+	}
+
+	return node.kind === "directory" ? node.path : node.parentPath;
+}
+
+function buildContextMenuItems(
+	node: SidebarViewNode,
+	hasClipboard: boolean,
+): NativeContextMenuItem[] {
 	const items: NativeContextMenuItem[] = [];
 
 	if (node.kind === "directory") {
@@ -163,13 +178,23 @@ function buildContextMenuItems(node: ProjectNode): NativeContextMenuItem[] {
 				accelerator: "CmdOrCtrl+Shift+N",
 			},
 		);
+
+		if (hasClipboard) {
+			items.push({
+				type: "action",
+				id: "paste",
+				label: "Paste",
+				accelerator: "CmdOrCtrl+V",
+			});
+		}
 	}
 
-	if (node.parentPath) {
+	if (node.node.parentPath) {
 		if (items.length > 0) {
 			items.push({ type: "separator" });
 		}
 		items.push(
+			{ type: "action", id: "copy", label: "Copy", accelerator: "CmdOrCtrl+C" },
 			{ type: "action", id: "rename", label: "Rename", accelerator: "Enter" },
 			{ type: "action", id: "delete", label: "Delete", accelerator: "Backspace" },
 		);
@@ -224,59 +249,63 @@ function InlineNameForm({
 }
 
 function ProjectTree({
-	depth = 0,
-	expandedPaths,
-	filter,
-	gitStatus,
 	node,
+	depth = 0,
 	activeFilePath,
+	expandedNestedPaths,
+	expandedPaths,
+	gitStatus,
 	onBeginCreate,
 	onBeginRename,
 	onCancelInlineState,
 	onCreateNode,
 	onDeleteNode,
+	onFocusTree,
 	onMoveNode,
 	onOpenNode,
+	onOpenContextMenu,
 	onRenameNode,
 	onSelectNode,
-	onOpenContextMenu,
+	onToggleNestedPath,
 	pendingCreate,
 	renamingPath,
 	selectedPath,
 }: {
+	node: SidebarViewNode;
 	depth?: number;
-	expandedPaths: Set<string>;
-	filter: string;
-	gitStatus: GitStatusMap;
-	node: ProjectNode;
 	activeFilePath: string | null;
+	expandedNestedPaths: ReadonlySet<string>;
+	expandedPaths: ReadonlySet<string>;
+	gitStatus: GitStatusMap;
 	onBeginCreate: (kind: ProjectNodeKind, targetPath?: string) => void;
 	onBeginRename: (targetPath: string) => void;
 	onCancelInlineState: () => void;
 	onCreateNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
+	onFocusTree: () => void;
 	onMoveNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
+	onOpenContextMenu: (node: SidebarViewNode, x: number, y: number) => void;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onSelectNode: (node: ProjectNode) => void;
-	onOpenContextMenu: (node: ProjectNode, x: number, y: number) => void;
+	onToggleNestedPath: (targetPath: string) => void;
 	pendingCreate: PendingCreateState | null;
 	renamingPath: string | null;
 	selectedPath: string | null;
 }) {
 	const isDirectory = node.kind === "directory";
 	const isExpanded = expandedPaths.has(node.path);
-	const isSelected = selectedPath === node.path;
+	const isSelected = matchesViewPath(node, selectedPath);
 	const isActiveFile = activeFilePath === node.path;
 	const isRenaming = renamingPath === node.path;
 	const showInlineCreate = pendingCreate?.parentPath === node.path && isDirectory;
+	const hasNestedChildren = node.nestedChildren.length > 0;
+	const isNestedExpanded = expandedNestedPaths.has(node.path);
 
 	const fileGitStatus = gitStatus[node.path] as GitFileStatus | undefined;
-	const dirGitStatus = isDirectory ? getDirectoryGitStatus(node, gitStatus) : null;
+	const dirGitStatus = isDirectory ? getDirectoryGitStatus(node.node, gitStatus) : null;
 	const effectiveGitStatus = fileGitStatus ?? dirGitStatus;
 	const gitColorClass = effectiveGitStatus ? GIT_STATUS_COLORS[effectiveGitStatus] : "";
-
-	const fileIcon = !isDirectory ? resolveFileIcon(node.name, false) : null;
 
 	const handleDragStart = React.useCallback(
 		(event: React.DragEvent) => {
@@ -288,7 +317,10 @@ function ProjectTree({
 
 	const handleDragOver = React.useCallback(
 		(event: React.DragEvent) => {
-			if (!isDirectory) return;
+			if (!isDirectory) {
+				return;
+			}
+
 			event.preventDefault();
 			event.dataTransfer.dropEffect = "move";
 		},
@@ -299,25 +331,48 @@ function ProjectTree({
 		(event: React.DragEvent) => {
 			event.preventDefault();
 			const sourcePath = event.dataTransfer.getData("text/plain");
-			if (!sourcePath || sourcePath === node.path) return;
-			if (node.path.startsWith(`${sourcePath}/`)) return;
+			if (!sourcePath || sourcePath === node.path || node.path.startsWith(`${sourcePath}/`)) {
+				return;
+			}
 
-			const targetDir = isDirectory ? node.path : node.parentPath;
-			if (targetDir && sourcePath !== targetDir) {
-				void onMoveNode(sourcePath, targetDir);
+			const targetDirectoryPath = isDirectory ? node.path : node.parentPath;
+			if (targetDirectoryPath && targetDirectoryPath !== sourcePath) {
+				void onMoveNode(sourcePath, targetDirectoryPath);
 			}
 		},
 		[isDirectory, node.parentPath, node.path, onMoveNode],
 	);
 
-	const visibleChildren = React.useMemo(() => {
-		if (!isDirectory || !node.children) return [];
-		return node.children.filter((child) => {
-			if (isHidden(child.name)) return false;
-			if (filter && !matchesFilter(child, filter)) return false;
-			return true;
-		});
-	}, [isDirectory, node.children, filter]);
+	const renderLeadingToggle = () => {
+		if (!isDirectory && !hasNestedChildren) {
+			return <span className="flex h-4 w-4 shrink-0" />;
+		}
+
+		const expanded = isDirectory ? isExpanded : isNestedExpanded;
+		return (
+			<button
+				type="button"
+				className="flex h-4 w-4 shrink-0 items-center justify-center text-foreground/50"
+				onClick={(event) => {
+					event.stopPropagation();
+					onFocusTree();
+					if (isDirectory) {
+						onSelectNode(node.node);
+						void onOpenNode(node.node);
+						return;
+					}
+					onToggleNestedPath(node.path);
+				}}
+				tabIndex={-1}
+			>
+				{expanded ? (
+					<ChevronDown className="h-4 w-4" />
+				) : (
+					<ChevronRight className="h-4 w-4" />
+				)}
+			</button>
+		);
+	};
 
 	return (
 		<div>
@@ -329,28 +384,18 @@ function ProjectTree({
 							? "bg-sky-500/10 text-sky-100"
 							: "text-foreground/85 hover:bg-panel-600"
 				}`}
-				style={{ paddingLeft: `${depth * 14 + 8}px` }}
-				draggable={!!node.parentPath}
+				style={{ paddingLeft: `${depth * TREE_INDENT_PX + 8}px` }}
+				draggable={!!node.node.parentPath}
 				onDragStart={handleDragStart}
 				onDragOver={handleDragOver}
 				onDrop={handleDrop}
 			>
 				{isRenaming ? (
 					<div className="flex min-w-0 flex-1 items-center gap-2">
-						<span className="flex h-4 w-4 items-center justify-center text-foreground/50">
-							{isDirectory ? (
-								isExpanded ? (
-									<ChevronDown className="h-4 w-4" />
-								) : (
-									<ChevronRight className="h-4 w-4" />
-								)
-							) : null}
-						</span>
-						{isDirectory ? (
-							isExpanded ? <FolderOpen className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />
-						) : (
-							fileIcon ? <FileIcon fileName={node.name} /> : <span className="h-4 w-4 shrink-0" />
-						)}
+						{renderLeadingToggle()}
+						{!isDirectory ? (
+							<FileIcon fileName={node.name} />
+						) : null}
 						<InlineNameForm
 							initialValue={node.name}
 							label="Rename"
@@ -361,10 +406,15 @@ function ProjectTree({
 				) : (
 					<button
 						type="button"
-						className="flex min-w-0 flex-1 items-center gap-2 text-left"
-						onClick={() => void onOpenNode(node)}
+						className={`flex min-w-0 flex-1 items-center ${isDirectory ? "gap-0.5" : "gap-1"} text-left`}
+						onMouseDown={onFocusTree}
+						onClick={() => {
+							onSelectNode(node.node);
+							void onOpenNode(node.node);
+						}}
 						onContextMenu={(event) => {
 							event.preventDefault();
+							onFocusTree();
 							onOpenContextMenu(node, event.clientX, event.clientY);
 						}}
 						onKeyDown={(event) => {
@@ -375,31 +425,23 @@ function ProjectTree({
 							}
 						}}
 					>
-						<span className="flex h-4 w-4 items-center justify-center text-foreground/50">
-							{isDirectory ? (
-								isExpanded ? (
-									<ChevronDown className="h-4 w-4" />
-								) : (
-									<ChevronRight className="h-4 w-4" />
-								)
-							) : null}
-						</span>
-						{isDirectory ? (
-							isExpanded ? (
-								<FolderOpen className={`h-4 w-4 shrink-0 ${dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
-							) : (
-								<Folder className={`h-4 w-4 shrink-0 ${dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
-							)
-						) : (
+						{renderLeadingToggle()}
+						{!isDirectory ? (
 							<FileIcon fileName={node.name} />
-						)}
-						<span className={`min-w-0 flex-1 truncate ${gitColorClass}`}>{node.name}</span>
+						) : null}
+						<span
+							className={`min-w-0 flex-1 truncate ${
+								isDirectory && dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : gitColorClass
+							}`}
+						>
+							{node.displayName}
+						</span>
 						{fileGitStatus ? (
 							<span className={`ml-auto shrink-0 text-[10px] font-semibold ${GIT_STATUS_COLORS[fileGitStatus]}`}>
 								{GIT_STATUS_LABELS[fileGitStatus]}
 							</span>
 						) : null}
-						{!node.permissions.write ? (
+						{!node.node.permissions.write ? (
 							<span className="rounded border border-border-500 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground/45">
 								Read only
 							</span>
@@ -410,33 +452,35 @@ function ProjectTree({
 
 			{isDirectory && isExpanded ? (
 				<div>
-					{node.isLoading ? (
+					{node.node.isLoading ? (
 						<div
 							className="px-2 py-1 text-xs text-foreground/45"
-							style={{ paddingLeft: `${(depth + 1) * 14 + 36}px` }}
+							style={{ paddingLeft: `${(depth + 1) * TREE_INDENT_PX + 36}px` }}
 						>
 							Loading...
 						</div>
 					) : null}
-					{visibleChildren.map((child) => (
+					{node.children.map((child) => (
 						<ProjectTree
 							key={child.path}
-							depth={depth + 1}
-							expandedPaths={expandedPaths}
-							filter={filter}
-							gitStatus={gitStatus}
 							node={child}
+							depth={depth + 1}
 							activeFilePath={activeFilePath}
+							expandedNestedPaths={expandedNestedPaths}
+							expandedPaths={expandedPaths}
+							gitStatus={gitStatus}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}
 							onCancelInlineState={onCancelInlineState}
 							onCreateNode={onCreateNode}
 							onDeleteNode={onDeleteNode}
+							onFocusTree={onFocusTree}
 							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
+							onOpenContextMenu={onOpenContextMenu}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
-							onOpenContextMenu={onOpenContextMenu}
+							onToggleNestedPath={onToggleNestedPath}
 							pendingCreate={pendingCreate}
 							renamingPath={renamingPath}
 							selectedPath={selectedPath}
@@ -445,7 +489,7 @@ function ProjectTree({
 					{showInlineCreate ? (
 						<div
 							className="px-2 py-1"
-							style={{ paddingLeft: `${(depth + 1) * 14 + 36}px` }}
+							style={{ paddingLeft: `${(depth + 1) * TREE_INDENT_PX + 36}px` }}
 						>
 							<InlineNameForm
 								initialValue={
@@ -459,6 +503,37 @@ function ProjectTree({
 							/>
 						</div>
 					) : null}
+				</div>
+			) : null}
+
+			{hasNestedChildren && isNestedExpanded ? (
+				<div>
+					{node.nestedChildren.map((child) => (
+						<ProjectTree
+							key={child.path}
+							node={child}
+							depth={depth + 1}
+							activeFilePath={activeFilePath}
+							expandedNestedPaths={expandedNestedPaths}
+							expandedPaths={expandedPaths}
+							gitStatus={gitStatus}
+							onBeginCreate={onBeginCreate}
+							onBeginRename={onBeginRename}
+							onCancelInlineState={onCancelInlineState}
+							onCreateNode={onCreateNode}
+							onDeleteNode={onDeleteNode}
+							onFocusTree={onFocusTree}
+							onMoveNode={onMoveNode}
+							onOpenNode={onOpenNode}
+							onOpenContextMenu={onOpenContextMenu}
+							onRenameNode={onRenameNode}
+							onSelectNode={onSelectNode}
+							onToggleNestedPath={onToggleNestedPath}
+							pendingCreate={pendingCreate}
+							renamingPath={renamingPath}
+							selectedPath={selectedPath}
+						/>
+					))}
 				</div>
 			) : null}
 		</div>
@@ -475,6 +550,7 @@ export function Sidebar({
 	onBeginCreate,
 	onBeginRename,
 	onCancelInlineState,
+	onCopyNode,
 	onCreateNode,
 	onDeleteNode,
 	onMoveNode,
@@ -490,17 +566,84 @@ export function Sidebar({
 	selectedPath,
 }: SidebarProps) {
 	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
+	const [expandedNestedPaths, setExpandedNestedPaths] = React.useState<Set<string>>(new Set());
 	const [filter, setFilter] = React.useState("");
 	const [showSearch, setShowSearch] = React.useState(false);
-	const searchInputRef = React.useRef<HTMLInputElement>(null);
+	const [clipboardPath, setClipboardPath] = React.useState<string | null>(null);
+	const [sortOrder, setSortOrder] = React.useState<SidebarSortOrder>(() => {
+		if (typeof window === "undefined") {
+			return "default";
+		}
+
+		const storedValue = window.localStorage.getItem(SORT_ORDER_STORAGE_KEY);
+		return SORT_OPTIONS.some((option) => option.value === storedValue)
+			? (storedValue as SidebarSortOrder)
+			: "default";
+	});
 	const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
-	const canRenameOrDelete = Boolean(
-		contextMenu?.node && contextMenu.node.parentPath,
+	const searchInputRef = React.useRef<HTMLInputElement>(null);
+	const treeRef = React.useRef<HTMLDivElement>(null);
+	const typeaheadRef = React.useRef<number | null>(null);
+	const typeaheadBufferRef = React.useRef("");
+
+	const treeNodes = React.useMemo(
+		() =>
+			buildSidebarTree(project?.roots ?? [], {
+				enableCompactFolders: true,
+				enableFileNesting: true,
+				filter,
+				hiddenEntries: HIDDEN_ENTRIES,
+				sortOrder,
+			}),
+		[filter, project?.roots, sortOrder],
+	);
+	const flatEntries = React.useMemo(
+		() => flattenSidebarTree(treeNodes, expandedPaths, expandedNestedPaths),
+		[expandedNestedPaths, expandedPaths, treeNodes],
+	);
+	const selectedEntryIndex = React.useMemo(
+		() => flatEntries.findIndex((entry) => matchesViewPath(entry.node, selectedPath)),
+		[flatEntries, selectedPath],
+	);
+	const canRenameOrDelete = Boolean(contextMenu?.node && contextMenu.node.node.parentPath);
+
+	const focusTree = React.useCallback(() => {
+		treeRef.current?.focus();
+	}, []);
+
+	const toggleNestedPath = React.useCallback((targetPath: string) => {
+		setExpandedNestedPaths((current) => {
+			const next = new Set(current);
+			if (next.has(targetPath)) {
+				next.delete(targetPath);
+			} else {
+				next.add(targetPath);
+			}
+			return next;
+		});
+	}, []);
+
+	const pasteIntoTarget = React.useCallback(
+		async (targetNode: SidebarViewNode | null) => {
+			const targetDirectoryPath = getPasteTargetDirectory(targetNode);
+			if (!clipboardPath || !targetDirectoryPath) {
+				return;
+			}
+
+			await onCopyNode(clipboardPath, targetDirectoryPath);
+		},
+		[clipboardPath, onCopyNode],
 	);
 
 	React.useEffect(() => {
 		injectSetiFont();
 	}, []);
+
+	React.useEffect(() => {
+		if (typeof window !== "undefined") {
+			window.localStorage.setItem(SORT_ORDER_STORAGE_KEY, sortOrder);
+		}
+	}, [sortOrder]);
 
 	React.useEffect(() => {
 		if (activeFilePath && project) {
@@ -511,9 +654,10 @@ export function Sidebar({
 	React.useEffect(() => {
 		if (showSearch) {
 			searchInputRef.current?.focus();
-		} else {
-			setFilter("");
+			return;
 		}
+
+		setFilter("");
 	}, [showSearch]);
 
 	React.useEffect(() => {
@@ -525,9 +669,9 @@ export function Sidebar({
 			if (contextMenuRef.current?.contains(event.target as Node)) {
 				return;
 			}
+
 			setContextMenu(null);
 		};
-
 		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
 				setContextMenu(null);
@@ -535,26 +679,27 @@ export function Sidebar({
 		};
 
 		window.addEventListener("mousedown", handlePointerDown);
-		window.addEventListener("resize", handleEscape as unknown as EventListener);
 		window.addEventListener("keydown", handleEscape);
 
 		return () => {
 			window.removeEventListener("mousedown", handlePointerDown);
-			window.removeEventListener("resize", handleEscape as unknown as EventListener);
 			window.removeEventListener("keydown", handleEscape);
 		};
 	}, [contextMenu]);
 
 	const openContextMenu = React.useCallback(
-		async (node: ProjectNode, x: number, y: number) => {
-			onSelectNode(node);
+		async (node: SidebarViewNode, x: number, y: number) => {
+			onSelectNode(node.node);
+			focusTree();
+
 			const nativeContextMenu = window.nativeContextMenu;
 			if (nativeContextMenu) {
 				const actionId = await nativeContextMenu.showMenu({
-					items: buildContextMenuItems(node),
+					items: buildContextMenuItems(node, Boolean(clipboardPath)),
 					x,
 					y,
 				});
+
 				if (actionId) {
 					switch (actionId) {
 						case "new-file":
@@ -563,11 +708,17 @@ export function Sidebar({
 						case "new-folder":
 							onBeginCreate("directory", node.path);
 							break;
+						case "copy":
+							setClipboardPath(node.path);
+							break;
+						case "paste":
+							void pasteIntoTarget(node);
+							break;
 						case "rename":
 							onBeginRename(node.path);
 							break;
 						case "delete":
-							if (window.confirm(`Delete "${node.name}"?`)) {
+							if (window.confirm(`Delete "${node.displayName}"?`)) {
 								void onDeleteNode(node.path);
 							}
 							break;
@@ -580,7 +731,15 @@ export function Sidebar({
 
 			setContextMenu({ node, x, y });
 		},
-		[onBeginCreate, onBeginRename, onDeleteNode, onSelectNode],
+		[
+			clipboardPath,
+			focusTree,
+			onBeginCreate,
+			onBeginRename,
+			onDeleteNode,
+			onSelectNode,
+			pasteIntoTarget,
+		],
 	);
 
 	const closeContextMenu = React.useCallback(() => {
@@ -595,13 +754,182 @@ export function Sidebar({
 		[closeContextMenu],
 	);
 
+	const handleTreeKeyDown = React.useCallback(
+		(event: React.KeyboardEvent<HTMLDivElement>) => {
+			if (!flatEntries.length) {
+				return;
+			}
+
+			const currentIndex = selectedEntryIndex >= 0 ? selectedEntryIndex : 0;
+			const currentEntry = flatEntries[currentIndex];
+			const key = event.key;
+			const isMeta = event.metaKey || event.ctrlKey;
+
+			if (isMeta && key.toLowerCase() === "f") {
+				event.preventDefault();
+				setShowSearch(true);
+				return;
+			}
+
+			if (isMeta && key.toLowerCase() === "c") {
+				if (currentEntry?.node.node.parentPath) {
+					event.preventDefault();
+					setClipboardPath(currentEntry.node.path);
+				}
+				return;
+			}
+
+			if (isMeta && key.toLowerCase() === "v") {
+				event.preventDefault();
+				void pasteIntoTarget(currentEntry?.node ?? null);
+				return;
+			}
+
+			if (!currentEntry) {
+				return;
+			}
+
+			if (key === "ArrowDown") {
+				event.preventDefault();
+				const nextEntry = flatEntries[Math.min(currentIndex + 1, flatEntries.length - 1)];
+				if (nextEntry) {
+					onSelectNode(nextEntry.node.node);
+				}
+				return;
+			}
+
+			if (key === "ArrowUp") {
+				event.preventDefault();
+				const nextEntry = flatEntries[Math.max(currentIndex - 1, 0)];
+				if (nextEntry) {
+					onSelectNode(nextEntry.node.node);
+				}
+				return;
+			}
+
+			if (key === "ArrowRight") {
+				event.preventDefault();
+				if (currentEntry.node.kind === "directory") {
+					if (!expandedPaths.has(currentEntry.node.path) && currentEntry.node.children.length > 0) {
+						void onOpenNode(currentEntry.node.node);
+						return;
+					}
+
+					const firstChild = flatEntries.find(
+						(entry) => entry.parentPath === currentEntry.node.path,
+					);
+					if (firstChild) {
+						onSelectNode(firstChild.node.node);
+					}
+					return;
+				}
+
+				if (currentEntry.node.nestedChildren.length > 0) {
+					if (!expandedNestedPaths.has(currentEntry.node.path)) {
+						toggleNestedPath(currentEntry.node.path);
+						return;
+					}
+
+					const firstChild = flatEntries.find(
+						(entry) => entry.parentPath === currentEntry.node.path,
+					);
+					if (firstChild) {
+						onSelectNode(firstChild.node.node);
+					}
+				}
+				return;
+			}
+
+			if (key === "ArrowLeft") {
+				event.preventDefault();
+				if (
+					currentEntry.node.kind === "directory" &&
+					expandedPaths.has(currentEntry.node.path)
+				) {
+					void onOpenNode(currentEntry.node.node);
+					return;
+				}
+
+				if (
+					currentEntry.node.nestedChildren.length > 0 &&
+					expandedNestedPaths.has(currentEntry.node.path)
+				) {
+					toggleNestedPath(currentEntry.node.path);
+					return;
+				}
+
+				if (currentEntry.parentPath) {
+					const parentEntry = flatEntries.find(
+						(entry) => entry.node.path === currentEntry.parentPath,
+					);
+					if (parentEntry) {
+						onSelectNode(parentEntry.node.node);
+					}
+				}
+				return;
+			}
+
+			if (key === "Enter" || key === " ") {
+				event.preventDefault();
+				void onOpenNode(currentEntry.node.node);
+				return;
+			}
+
+			if (key === "Home") {
+				event.preventDefault();
+				onSelectNode(flatEntries[0].node.node);
+				return;
+			}
+
+			if (key === "End") {
+				event.preventDefault();
+				onSelectNode(flatEntries[flatEntries.length - 1].node.node);
+				return;
+			}
+
+			if (
+				key.length === 1 &&
+				!event.altKey &&
+				!event.ctrlKey &&
+				!event.metaKey
+			) {
+				const nextBuffer = `${typeaheadBufferRef.current}${key.toLowerCase()}`;
+				typeaheadBufferRef.current = nextBuffer;
+				if (typeaheadRef.current) {
+					window.clearTimeout(typeaheadRef.current);
+				}
+				typeaheadRef.current = window.setTimeout(() => {
+					typeaheadBufferRef.current = "";
+					typeaheadRef.current = null;
+				}, 500);
+
+				for (let offset = 1; offset <= flatEntries.length; offset += 1) {
+					const index = (currentIndex + offset) % flatEntries.length;
+					const candidate = flatEntries[index];
+					if (candidate.node.displayName.toLowerCase().startsWith(nextBuffer)) {
+						onSelectNode(candidate.node.node);
+						break;
+					}
+				}
+			}
+		},
+		[
+			expandedNestedPaths,
+			expandedPaths,
+			flatEntries,
+			onOpenNode,
+			onSelectNode,
+			pasteIntoTarget,
+			selectedEntryIndex,
+			toggleNestedPath,
+		],
+	);
+
 	const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 210) : 0;
-	const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 220) : 0;
+	const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 240) : 0;
 
 	return (
-		<div
-			className={`flex h-full flex-col rounded-[16px] bg-panel ${className ?? ""}`}
-		>
+		<div className={`flex h-full flex-col rounded-[16px] bg-panel ${className ?? ""}`}>
 			<div className="flex items-center justify-between border-b border-border-500 px-4 py-3">
 				<div className="min-w-0">
 					<div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground/45">
@@ -653,7 +981,7 @@ export function Sidebar({
 						className="h-8 w-8"
 						aria-label="Search files"
 						disabled={!project}
-						onClick={() => setShowSearch((s) => !s)}
+						onClick={() => setShowSearch((current) => !current)}
 					>
 						<Search className="h-4 w-4" />
 					</Button>
@@ -670,32 +998,35 @@ export function Sidebar({
 				</div>
 			</div>
 
-			{showSearch ? (
-				<div className="flex items-center gap-2 border-b border-border-500 px-3 py-2">
-					<Search className="h-3.5 w-3.5 shrink-0 text-foreground/40" />
-					<input
-						ref={searchInputRef}
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Escape") {
-								setShowSearch(false);
-							}
-						}}
-						className="h-6 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-foreground/35"
-						placeholder="Filter files..."
-					/>
-					{filter ? (
+			<div className="flex items-center gap-2 border-b border-border-500 px-3 py-2">
+				{showSearch && (
+					<>
+						<Search className="h-3.5 w-3.5 shrink-0 text-foreground/40" />
+						<input
+							ref={searchInputRef}
+							value={filter}
+							onChange={(event) => setFilter(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") {
+									setShowSearch(false);
+								}
+							}}
+							className="h-6 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground/35"
+							placeholder="Filter files..."
+						/>
 						<button
 							type="button"
-							onClick={() => setFilter("")}
+							onClick={() => {
+								setFilter("");
+								setShowSearch(false);
+							}}
 							className="shrink-0 text-foreground/40 hover:text-foreground/70"
 						>
 							<X className="h-3.5 w-3.5" />
 						</button>
-					) : null}
-				</div>
-			) : null}
+					</>
+				)}
+			</div>
 
 			{error ? (
 				<div className="border-b border-border-500 bg-destructive/10 px-4 py-2 text-xs text-foreground/80">
@@ -703,26 +1034,33 @@ export function Sidebar({
 				</div>
 			) : null}
 
-			<div className="min-h-0 flex-1 overflow-auto px-2 py-3">
+			<div
+				ref={treeRef}
+				className="min-h-0 flex-1 overflow-auto px-2 py-3 outline-none"
+				tabIndex={0}
+				onKeyDown={handleTreeKeyDown}
+			>
 				{project ? (
-					project.roots.map((root) => (
+					treeNodes.map((root) => (
 						<ProjectTree
 							key={root.path}
-							expandedPaths={expandedPaths}
-							filter={filter}
-							gitStatus={gitStatus}
 							node={root}
 							activeFilePath={activeFilePath}
+							expandedNestedPaths={expandedNestedPaths}
+							expandedPaths={expandedPaths}
+							gitStatus={gitStatus}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}
 							onCancelInlineState={onCancelInlineState}
 							onCreateNode={onCreateNode}
 							onDeleteNode={onDeleteNode}
+							onFocusTree={focusTree}
 							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
+							onOpenContextMenu={openContextMenu}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
-							onOpenContextMenu={openContextMenu}
+							onToggleNestedPath={toggleNestedPath}
 							pendingCreate={pendingCreate}
 							renamingPath={renamingPath}
 							selectedPath={selectedPath}
@@ -779,12 +1117,34 @@ export function Sidebar({
 								<FolderPlus className="h-4 w-4" />
 								New Folder
 							</button>
+							{clipboardPath ? (
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
+									onClick={() => runMenuAction(() => pasteIntoTarget(contextMenu.node))}
+								>
+									<Copy className="h-4 w-4" />
+									Paste
+								</button>
+							) : null}
 						</>
 					) : null}
 
 					{canRenameOrDelete ? (
 						<>
 							<div className="my-1 border-t border-border-500" />
+							<button
+								type="button"
+								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
+								onClick={() =>
+									runMenuAction(() => {
+										setClipboardPath(contextMenu.node.path);
+									})
+								}
+							>
+								<Copy className="h-4 w-4" />
+								Copy
+							</button>
 							<button
 								type="button"
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
@@ -800,7 +1160,7 @@ export function Sidebar({
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-destructive-foreground/80 hover:bg-panel-500 hover:text-destructive-foreground"
 								onClick={() =>
 									runMenuAction(() => {
-										if (window.confirm(`Delete "${contextMenu.node.name}"?`)) {
+										if (window.confirm(`Delete "${contextMenu.node.displayName}"?`)) {
 											return onDeleteNode(contextMenu.node.path);
 										}
 									})

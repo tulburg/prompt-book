@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("projectBridge", {
     ipcRenderer.invoke("project:create-file", parentPath, name, content),
   createFolder: (parentPath: string, name: string) =>
     ipcRenderer.invoke("project:create-folder", parentPath, name),
+  copyPath: (sourcePath: string, targetDirectoryPath: string) =>
+    ipcRenderer.invoke("project:copy-path", sourcePath, targetDirectoryPath),
   renamePath: (targetPath: string, nextName: string) =>
     ipcRenderer.invoke("project:rename-path", targetPath, nextName),
   deletePath: (targetPath: string) =>

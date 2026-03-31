@@ -48,6 +48,7 @@ export default function App() {
                         projectManager.setPendingCreate(null);
                         projectManager.setRenamingPath(null);
                       }}
+                      onCopyNode={projectManager.copyNode}
                       onCreateNode={projectManager.createNode}
                       onDeleteNode={projectManager.deleteNode}
                       onMoveNode={projectManager.moveNode}

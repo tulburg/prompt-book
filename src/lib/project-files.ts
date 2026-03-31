@@ -89,6 +89,10 @@ export interface ProjectBridge {
 		content?: string,
 	) => Promise<CreateNodeResult>;
 	createFolder: (parentPath: string, name: string) => Promise<CreateNodeResult>;
+	copyPath?: (
+		sourcePath: string,
+		targetDirectoryPath: string,
+	) => Promise<CreateNodeResult>;
 	renamePath: (targetPath: string, nextName: string) => Promise<RenameNodeResult>;
 	deletePath: (targetPath: string) => Promise<DeleteNodeResult>;
 	movePath?: (sourcePath: string, targetDirectoryPath: string) => Promise<RenameNodeResult>;
