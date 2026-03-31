@@ -6,6 +6,7 @@ import {
   X,
 } from "lucide-react";
 import * as React from "react";
+import Bus from "@/lib/bus";
 
 import { Button } from "./Button";
 
@@ -25,7 +26,13 @@ export function Header() {
       className={`h-12 bg-panel flex items-center justify-between px-3 select-none pl-20 ${dragRegionClass}`}
     >
       <div className={`flex items-center gap-1 ${noDragClass}`}>
-        <Button size="icon" variant="ghost" className="h-7 w-7">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Toggle sidebar"
+          onClick={() => Bus.emit("sidebar:toggle", undefined)}
+        >
           <SidebarIcon className="h-4 w-4" />
         </Button>
         <Button size="icon" variant="ghost" className="h-7 w-7">

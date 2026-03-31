@@ -6,7 +6,6 @@ import type {
   ProjectSnapshot,
 } from "@/lib/project-files";
 import { Button } from "@/ui/lower/Button";
-import { Title } from "../lower/Typography";
 
 interface PromptEditorProps
   extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
@@ -36,9 +35,9 @@ export function PromptEditor({
 
   return (
     <div
-      className={`grid h-full min-h-0 grid-cols-[1fr_280px] rounded-[16px] bg-panel-700 ${className ?? ""}`}
+      className={`flex h-full min-h-0 min-w-0 rounded-[16px] bg-panel-700 ${className ?? ""}`}
     >
-      <div className="flex min-h-0 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border-500 px-5 py-3">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground/45">
@@ -56,7 +55,7 @@ export function PromptEditor({
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1">
           {!project ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
               <div className="rounded-full border border-border-500 bg-panel-600 p-4">
@@ -106,43 +105,6 @@ export function PromptEditor({
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="border-l border-border-500 p-6">
-        <Title>Selection</Title>
-        <div className="mt-4 space-y-4 text-xs text-foreground/70">
-          <div>
-            <div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
-              Type
-            </div>
-            <div>{selectedNode?.kind ?? "None"}</div>
-          </div>
-          <div>
-            <div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
-              Path
-            </div>
-            <div className="break-all">
-              {selectedNode?.path ?? project?.roots[0]?.path ?? "N/A"}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
-              Permissions
-            </div>
-            <div>
-              {selectedNode?.permissions.read ? "read" : "no-read"} /{" "}
-              {selectedNode?.permissions.write ? "write" : "read-only"}
-            </div>
-          </div>
-          {activeFile ? (
-            <div>
-              <div className="mb-1 uppercase tracking-[0.2em] text-foreground/40">
-                Status
-              </div>
-              <div>{isDirty ? "Unsaved changes" : "Saved"}</div>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

@@ -12,8 +12,43 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import type { NativeContextMenuItem } from "@/lib/native-context-menu";
-import type { ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
+import type { GitFileStatus, GitStatusMap, ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
 import { Button } from "@/ui/lower/Button";
+
+const GIT_STATUS_COLORS: Record<GitFileStatus, string> = {
+	modified: "text-yellow-400",
+	added: "text-green-400",
+	deleted: "text-red-400",
+	renamed: "text-cyan-400",
+	untracked: "text-green-500",
+	ignored: "text-foreground/30",
+	conflict: "text-orange-400",
+};
+
+const GIT_STATUS_LABELS: Record<GitFileStatus, string> = {
+	modified: "M",
+	added: "A",
+	deleted: "D",
+	renamed: "R",
+	untracked: "U",
+	ignored: "!",
+	conflict: "C",
+};
+
+function getDirectoryGitStatus(
+	node: ProjectNode,
+	gitStatus: GitStatusMap,
+): GitFileStatus | null {
+	if (node.kind !== "directory") return null;
+
+	const prefix = node.path.endsWith("/") ? node.path : `${node.path}/`;
+	const childStatuses = Object.keys(gitStatus).filter(
+		(p) => p.startsWith(prefix),
+	);
+
+	if (childStatuses.length === 0) return null;
+	return "modified";
+}
 
 interface PendingCreateState {
 	parentPath: string;
@@ -28,6 +63,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	renamingPath: string | null;
 	isBusy: boolean;
 	error: string | null;
+	gitStatus: GitStatusMap;
 	onOpenProjectFolder: () => void | Promise<void>;
 	onRefresh: () => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
@@ -127,6 +163,7 @@ function InlineNameForm({
 function ProjectTree({
 	depth = 0,
 	expandedPaths,
+	gitStatus,
 	node,
 	onBeginCreate,
 	onBeginRename,
@@ -143,6 +180,7 @@ function ProjectTree({
 }: {
 	depth?: number;
 	expandedPaths: Set<string>;
+	gitStatus: GitStatusMap;
 	node: ProjectNode;
 	onBeginCreate: (kind: ProjectNodeKind, targetPath?: string) => void;
 	onBeginRename: (targetPath: string) => void;
@@ -163,6 +201,11 @@ function ProjectTree({
 	const isRenaming = renamingPath === node.path;
 	const showInlineCreate = pendingCreate?.parentPath === node.path && isDirectory;
 	const Icon = isDirectory ? (isExpanded ? FolderOpen : Folder) : File;
+
+	const fileGitStatus = gitStatus[node.path] as GitFileStatus | undefined;
+	const dirGitStatus = isDirectory ? getDirectoryGitStatus(node, gitStatus) : null;
+	const effectiveGitStatus = fileGitStatus ?? dirGitStatus;
+	const gitColorClass = effectiveGitStatus ? GIT_STATUS_COLORS[effectiveGitStatus] : "";
 
 	return (
 		<div>
@@ -217,8 +260,13 @@ function ProjectTree({
 								)
 							) : null}
 						</span>
-						<Icon className="h-4 w-4 shrink-0" />
-						<span className="truncate">{node.name}</span>
+						<Icon className={`h-4 w-4 shrink-0 ${isDirectory && dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : ""}`} />
+						<span className={`truncate ${gitColorClass}`}>{node.name}</span>
+						{fileGitStatus ? (
+							<span className={`ml-auto shrink-0 text-[10px] font-semibold ${GIT_STATUS_COLORS[fileGitStatus]}`}>
+								{GIT_STATUS_LABELS[fileGitStatus]}
+							</span>
+						) : null}
 						{!node.permissions.write ? (
 							<span className="rounded border border-border-500 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground/45">
 								Read only
@@ -243,6 +291,7 @@ function ProjectTree({
 							key={child.path}
 							depth={depth + 1}
 							expandedPaths={expandedPaths}
+							gitStatus={gitStatus}
 							node={child}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}
@@ -285,6 +334,7 @@ export function Sidebar({
 	className,
 	error,
 	expandedPaths,
+	gitStatus,
 	isBusy,
 	onBeginCreate,
 	onBeginRename,
@@ -463,6 +513,7 @@ export function Sidebar({
 						<ProjectTree
 							key={root.path}
 							expandedPaths={expandedPaths}
+							gitStatus={gitStatus}
 							node={root}
 							onBeginCreate={onBeginCreate}
 							onBeginRename={onBeginRename}

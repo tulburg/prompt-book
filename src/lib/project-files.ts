@@ -1,6 +1,17 @@
 export type ProjectNodeKind = "file" | "directory";
 export type ProjectSource = "electron" | "web";
 
+export type GitFileStatus =
+	| "modified"
+	| "added"
+	| "deleted"
+	| "renamed"
+	| "untracked"
+	| "ignored"
+	| "conflict";
+
+export type GitStatusMap = Record<string, GitFileStatus>;
+
 export interface ProjectPermissions {
 	read: boolean;
 	write: boolean;
@@ -80,4 +91,5 @@ export interface ProjectBridge {
 	createFolder: (parentPath: string, name: string) => Promise<CreateNodeResult>;
 	renamePath: (targetPath: string, nextName: string) => Promise<RenameNodeResult>;
 	deletePath: (targetPath: string) => Promise<DeleteNodeResult>;
+	gitStatus?: (rootPath: string) => Promise<GitStatusMap | null>;
 }

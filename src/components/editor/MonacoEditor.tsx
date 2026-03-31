@@ -216,6 +216,24 @@ export function MonacoEditor({
 
 	React.useEffect(() => {
 		const editor = editorRef.current;
+		const container = containerRef.current;
+		if (!editor || !container || typeof ResizeObserver === "undefined") {
+			return;
+		}
+
+		const observer = new ResizeObserver(() => {
+			editor.layout();
+		});
+
+		observer.observe(container);
+
+		return () => {
+			observer.disconnect();
+		};
+	}, [editorReady]);
+
+	React.useEffect(() => {
+		const editor = editorRef.current;
 		if (!editor) {
 			return;
 		}
@@ -245,5 +263,11 @@ export function MonacoEditor({
 		isApplyingExternalState.current = false;
 	}, [activeFile.content, activeFile.path, activeFile.permissions.write, editorReady]);
 
-	return <div ref={containerRef} className={cn("h-full w-full", className)} {...props} />;
+	return (
+		<div
+			ref={containerRef}
+			className={cn("h-full min-w-0 w-full", className)}
+			{...props}
+		/>
+	);
 }

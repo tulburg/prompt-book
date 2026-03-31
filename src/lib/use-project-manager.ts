@@ -763,6 +763,7 @@ export function useProjectManager() {
 		isBootstrapping,
 		isBusy,
 		openNode,
+		projectBridge,
 		selectNode,
 		openProjectFolder,
 		pendingCreate,
