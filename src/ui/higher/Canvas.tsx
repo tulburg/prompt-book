@@ -1,4 +1,10 @@
 import { MonacoEditor } from "@/components/editor/MonacoEditor";
+import {
+	SETTINGS_EDITOR_PATH,
+	type ApplicationSettingDescriptor,
+	type ApplicationSettingKey,
+	type ApplicationSettings,
+} from "@/lib/application-settings";
 import type {
 	ActiveFileState,
 	ProjectNode,
@@ -8,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/ui/lower/Button";
 import { FileCode2, FolderOpen, Save, X } from "lucide-react";
 
+import { Settings } from "./Settings";
+
 interface PromptEditorProps
 	extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
 	project: ProjectSnapshot | null;
@@ -16,6 +24,9 @@ interface PromptEditorProps
 	activeFilePath: string | null;
 	openFiles: ActiveFileState[];
 	previewFilePath: string | null;
+	activeSettings: ApplicationSettings | null;
+	settingsDescriptors: ApplicationSettingDescriptor[];
+	settingsJson: string;
 	isBusy: boolean;
 	onChange: (content: string) => void;
 	onActivateFile: (path: string) => void;
@@ -23,11 +34,16 @@ interface PromptEditorProps
 	onOpenProjectFolder: () => void | Promise<void>;
 	onPinFile: (path: string) => void;
 	onSave: () => void | Promise<void>;
+	onSettingChange: <K extends ApplicationSettingKey>(
+		key: K,
+		value: ApplicationSettings[K],
+	) => void;
 }
 
 export function PromptEditor({
 	activeFile,
 	activeFilePath,
+	activeSettings,
 	className,
 	isBusy,
 	onChange,
@@ -36,15 +52,20 @@ export function PromptEditor({
 	onOpenProjectFolder,
 	onPinFile,
 	onSave,
+	onSettingChange,
 	openFiles,
 	previewFilePath,
 	project,
 	selectedNode,
+	settingsDescriptors,
+	settingsJson,
 }: PromptEditorProps) {
 	const isDirty =
 		activeFile &&
 		activeFile.content !== activeFile.savedContent &&
 		!activeFile.isLoading;
+	const isSettingsView =
+		activeFilePath === SETTINGS_EDITOR_PATH && Boolean(activeSettings);
 
 	return (
 		<div
@@ -132,7 +153,14 @@ export function PromptEditor({
 				) : null}
 
 				<div className="min-h-0 min-w-0 flex-1">
-					{!project ? (
+					{isSettingsView && activeSettings ? (
+						<Settings
+							descriptors={settingsDescriptors}
+							jsonContent={settingsJson}
+							onChange={onSettingChange}
+							settings={activeSettings}
+						/>
+					) : !project ? (
 						<div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
 							<div className="rounded-full border border-border-500 bg-panel-600 p-4">
 								<FolderOpen className="h-8 w-8 text-foreground/70" />

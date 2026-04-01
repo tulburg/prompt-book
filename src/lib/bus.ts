@@ -1,4 +1,5 @@
 interface EventDataMap {
+  "settings:open": void;
   "sidebar:toggle": void;
 }
 

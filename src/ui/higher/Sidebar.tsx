@@ -52,14 +52,7 @@ const HIDDEN_ENTRIES = new Set([
 	".env.local",
 	"Thumbs.db",
 ]);
-const SORT_ORDER_STORAGE_KEY = "prompt-book-sidebar-sort-order";
 const TREE_INDENT_PX = 7;
-const SORT_OPTIONS: Array<{ value: SidebarSortOrder; label: string }> = [
-	{ value: "default", label: "Default" },
-	{ value: "files-first", label: "Files First" },
-	{ value: "type", label: "Type" },
-	{ value: "modified", label: "Modified" },
-];
 
 const GIT_STATUS_COLORS: Record<GitFileStatus, string> = {
 	modified: "text-yellow-400",
@@ -157,6 +150,10 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	onCancelInlineState: () => void;
 	onSelectNode: (node: ProjectNode) => void;
 	onRevealPath: (targetPath: string) => void;
+	sortOrder: SidebarSortOrder;
+	enableCompactFolders: boolean;
+	enableFileNesting: boolean;
+	autoReveal: boolean;
 }
 
 interface ContextMenuState {
@@ -602,7 +599,10 @@ function ProjectTree({
 }
 
 export function Sidebar({
+	autoReveal,
 	className,
+	enableCompactFolders,
+	enableFileNesting,
 	error,
 	expandedPaths,
 	gitStatus,
@@ -626,6 +626,7 @@ export function Sidebar({
 	project,
 	renamingPath,
 	selectedPath,
+	sortOrder,
 }: SidebarProps) {
 	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(
 		null,
@@ -636,16 +637,6 @@ export function Sidebar({
 	const [filter, setFilter] = React.useState("");
 	const [showSearch, setShowSearch] = React.useState(false);
 	const [clipboardPath, setClipboardPath] = React.useState<string | null>(null);
-	const [sortOrder] = React.useState<SidebarSortOrder>(() => {
-		if (typeof window === "undefined") {
-			return "default";
-		}
-
-		const storedValue = window.localStorage.getItem(SORT_ORDER_STORAGE_KEY);
-		return SORT_OPTIONS.some((option) => option.value === storedValue)
-			? (storedValue as SidebarSortOrder)
-			: "default";
-	});
 	const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 	const searchInputRef = React.useRef<HTMLInputElement>(null);
 	const treeRef = React.useRef<HTMLDivElement>(null);
@@ -655,13 +646,13 @@ export function Sidebar({
 	const treeNodes = React.useMemo(
 		() =>
 			buildSidebarTree(project?.roots ?? [], {
-				enableCompactFolders: true,
-				enableFileNesting: true,
+				enableCompactFolders,
+				enableFileNesting,
 				filter,
 				hiddenEntries: HIDDEN_ENTRIES,
 				sortOrder,
 			}),
-		[filter, project?.roots, sortOrder],
+		[enableCompactFolders, enableFileNesting, filter, project?.roots, sortOrder],
 	);
 	const flatEntries = React.useMemo(
 		() => flattenSidebarTree(treeNodes, expandedPaths, expandedNestedPaths),
@@ -709,16 +700,10 @@ export function Sidebar({
 	}, []);
 
 	React.useEffect(() => {
-		if (typeof window !== "undefined") {
-			window.localStorage.setItem(SORT_ORDER_STORAGE_KEY, sortOrder);
-		}
-	}, [sortOrder]);
-
-	React.useEffect(() => {
-		if (activeFilePath && project) {
+		if (autoReveal && activeFilePath && project) {
 			onRevealPath(activeFilePath);
 		}
-	}, [activeFilePath, onRevealPath, project]);
+	}, [activeFilePath, autoReveal, onRevealPath, project]);
 
 	React.useEffect(() => {
 		if (showSearch) {

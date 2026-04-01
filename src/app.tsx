@@ -1,20 +1,40 @@
+import {
+	SETTINGS_EDITOR_PATH,
+} from "@/lib/application-settings";
 import Bus from "@/lib/bus";
 import { useGitStatus } from "@/lib/use-git-status";
+import { useApplicationSettings } from "@/lib/use-application-settings";
 import { useProjectManager } from "@/lib/use-project-manager";
+import type { ProjectNode } from "@/lib/project-files";
 import { ExplorerPanel, FrameHost, Header, PromptEditor, Sidebar } from "@/ui";
 import * as React from "react";
 
 export default function App() {
 	const projectManager = useProjectManager();
+	const applicationSettings = useApplicationSettings();
+	const settings = applicationSettings.settings;
 	const gitStatus = useGitStatus(
 		projectManager.project,
 		projectManager.projectBridge,
 	);
-	const [sidebarOpen, setSidebarOpen] = React.useState(true);
+	const isSidebarVisible = settings?.["workbench.sidebar.visible"] ?? true;
+	const sidebarSortOrder =
+		settings?.["workbench.sidebar.sortOrder"] ?? "default";
+	const enableCompactFolders = settings?.["explorer.compactFolders"] ?? true;
+	const enableFileNesting =
+		settings?.["explorer.fileNesting.enabled"] ?? true;
+	const autoReveal = settings?.["explorer.autoReveal"] ?? true;
 
 	React.useEffect(() => {
 		const handleSidebarToggle = () => {
-			setSidebarOpen((current) => !current);
+			if (!settings) {
+				return;
+			}
+
+			applicationSettings.updateSetting(
+				"workbench.sidebar.visible",
+				!settings["workbench.sidebar.visible"],
+			);
 		};
 
 		Bus.on("sidebar:toggle", handleSidebarToggle);
@@ -22,7 +42,95 @@ export default function App() {
 		return () => {
 			Bus.off("sidebar:toggle", handleSidebarToggle);
 		};
-	}, []);
+	}, [applicationSettings.updateSetting, settings]);
+
+	const openFiles = React.useMemo(() => {
+		if (
+			applicationSettings.isSettingsOpen &&
+			applicationSettings.activeSettingsFile
+		) {
+			return [
+				...projectManager.openFiles,
+				applicationSettings.activeSettingsFile,
+			];
+		}
+
+		return projectManager.openFiles;
+	}, [
+		applicationSettings.activeSettingsFile,
+		applicationSettings.isSettingsOpen,
+		projectManager.openFiles,
+	]);
+
+	const activeFile = applicationSettings.isSettingsActive
+		? applicationSettings.activeSettingsFile
+		: projectManager.activeFile;
+	const activeFilePath = applicationSettings.isSettingsActive
+		? SETTINGS_EDITOR_PATH
+		: projectManager.activeFilePath;
+
+	const handleActivateFile = React.useCallback(
+		(path: string) => {
+			if (path === SETTINGS_EDITOR_PATH) {
+				applicationSettings.activateSettings();
+				return;
+			}
+
+			applicationSettings.deactivateSettings();
+			projectManager.activateFile(path);
+		},
+		[applicationSettings, projectManager],
+	);
+
+	const handleCloseFile = React.useCallback(
+		(path: string) => {
+			if (path === SETTINGS_EDITOR_PATH) {
+				applicationSettings.closeSettings();
+				return;
+			}
+
+			projectManager.closeFile(path);
+		},
+		[applicationSettings, projectManager],
+	);
+
+	const handlePinFile = React.useCallback(
+		(path: string) => {
+			if (path === SETTINGS_EDITOR_PATH) {
+				applicationSettings.activateSettings();
+				return;
+			}
+
+			applicationSettings.deactivateSettings();
+			projectManager.pinFile(path);
+		},
+		[applicationSettings, projectManager],
+	);
+
+	const handleOpenNode = React.useCallback(
+		async (node: ProjectNode) => {
+			applicationSettings.deactivateSettings();
+			await projectManager.openNode(node);
+		},
+		[applicationSettings, projectManager],
+	);
+
+	const handlePreviewNode = React.useCallback(
+		async (node: ProjectNode) => {
+			applicationSettings.deactivateSettings();
+			await projectManager.previewNode(node);
+		},
+		[applicationSettings, projectManager],
+	);
+
+	const handleSave = React.useCallback(async () => {
+		if (activeFilePath === SETTINGS_EDITOR_PATH) {
+			await applicationSettings.saveSettings();
+			return;
+		}
+
+		await projectManager.saveActiveFile();
+	}, [activeFilePath, applicationSettings, projectManager]);
 
 	return (
 		<div className="bg-panel flex h-screen w-screen flex-col">
@@ -32,7 +140,7 @@ export default function App() {
 				storageKey="prompt-book-layout"
 				className="h-screen w-screen"
 				panels={[
-					...(sidebarOpen
+					...(isSidebarVisible
 						? [
 								{
 									id: "sidebar",
@@ -40,7 +148,10 @@ export default function App() {
 									defaultSize: 12,
 									children: (
 										<Sidebar
-											activeFilePath={projectManager.activeFilePath}
+											activeFilePath={activeFilePath}
+											autoReveal={autoReveal}
+											enableCompactFolders={enableCompactFolders}
+											enableFileNesting={enableFileNesting}
 											error={projectManager.error}
 											expandedPaths={projectManager.expandedPaths}
 											gitStatus={gitStatus}
@@ -57,8 +168,8 @@ export default function App() {
 											onCreateNode={projectManager.createNode}
 											onDeleteNode={projectManager.deleteNode}
 											onMoveNode={projectManager.moveNode}
-											onOpenNode={projectManager.openNode}
-											onPreviewNode={projectManager.previewNode}
+											onOpenNode={handleOpenNode}
+											onPreviewNode={handlePreviewNode}
 											onOpenProjectFolder={projectManager.openProjectFolder}
 											onRefresh={() => projectManager.refreshProject()}
 											onRenameNode={projectManager.renameNode}
@@ -68,6 +179,7 @@ export default function App() {
 											project={projectManager.project}
 											renamingPath={projectManager.renamingPath}
 											selectedPath={projectManager.selectedPath}
+											sortOrder={sidebarSortOrder}
 										/>
 									),
 								},
@@ -79,19 +191,23 @@ export default function App() {
 						defaultSize: 45,
 						children: (
 							<PromptEditor
-								activeFile={projectManager.activeFile}
-								activeFilePath={projectManager.activeFilePath}
+								activeFile={activeFile}
+								activeFilePath={activeFilePath}
+								activeSettings={applicationSettings.settings}
 								isBusy={projectManager.isBusy}
 								onChange={projectManager.updateActiveFileContent}
-								onActivateFile={projectManager.activateFile}
-								onCloseFile={projectManager.closeFile}
+								onActivateFile={handleActivateFile}
+								onCloseFile={handleCloseFile}
 								onOpenProjectFolder={projectManager.openProjectFolder}
-								onPinFile={projectManager.pinFile}
-								onSave={projectManager.saveActiveFile}
-								openFiles={projectManager.openFiles}
+								onPinFile={handlePinFile}
+								onSave={handleSave}
+								onSettingChange={applicationSettings.updateSetting}
+								openFiles={openFiles}
 								previewFilePath={projectManager.previewFilePath}
 								project={projectManager.project}
 								selectedNode={projectManager.selectedNode}
+								settingsDescriptors={applicationSettings.settingDescriptors}
+								settingsJson={applicationSettings.settingsJson}
 							/>
 						),
 					},

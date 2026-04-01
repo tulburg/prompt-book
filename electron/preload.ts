@@ -1,4 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
+import type { ApplicationSettings } from '../src/lib/application-settings'
 import type { NativeContextMenuRequest } from '../src/lib/native-context-menu'
 
 // --------- Expose some API to the Renderer process ---------
@@ -47,6 +48,19 @@ contextBridge.exposeInMainWorld("projectBridge", {
     ipcRenderer.invoke("project:move-path", sourcePath, targetDirectoryPath),
   gitStatus: (rootPath: string) =>
     ipcRenderer.invoke("git:status", rootPath),
+})
+
+contextBridge.exposeInMainWorld("settingsBridge", {
+  load: () => ipcRenderer.invoke("app-settings:load"),
+  save: (settings: ApplicationSettings) =>
+    ipcRenderer.invoke("app-settings:save", settings),
+  onOpenRequested: (listener: () => void) => {
+    const handler = () => listener()
+    ipcRenderer.on("app:open-settings", handler)
+    return () => {
+      ipcRenderer.off("app:open-settings", handler)
+    }
+  },
 })
 
 contextBridge.exposeInMainWorld("nativeContextMenu", {

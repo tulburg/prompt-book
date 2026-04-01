@@ -1,6 +1,7 @@
 export * from "./higher/Canvas";
 export * from "./higher/ExplorerPanel";
 export * from "./higher/FrameHost";
+export * from "./higher/Settings";
 export * from "./higher/Sidebar";
 export * from "./higher/WindowFrame";
 

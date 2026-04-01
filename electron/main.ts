@@ -5,6 +5,11 @@ import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  DEFAULT_APPLICATION_SETTINGS,
+  sanitizeApplicationSettings,
+  type ApplicationSettings,
+} from "../src/lib/application-settings";
 import type { NativeContextMenuRequest } from "../src/lib/native-context-menu";
 
 createRequire(import.meta.url);
@@ -33,6 +38,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 // Store for window state persistence
 const store = new Store({
   defaults: {
+    applicationSettings: DEFAULT_APPLICATION_SETTINGS,
     lastProjectPaths: [] as string[],
     windowState: {
       width: 1024,
@@ -249,6 +255,105 @@ async function getAvailableCopyPath(targetDirectoryPath: string, sourceName: str
   throw new Error("Unable to determine a destination for the copied item.");
 }
 
+function sendOpenSettingsEvent() {
+  const targetWindow = BrowserWindow.getFocusedWindow() ?? win;
+  targetWindow?.webContents.send("app:open-settings");
+}
+
+function setApplicationMenu() {
+  const isMac = process.platform === "darwin";
+  const template: Electron.MenuItemConstructorOptions[] = [];
+
+  if (isMac) {
+    const appSubmenu: Electron.MenuItemConstructorOptions[] = [
+      { role: "about" },
+      {
+        accelerator: "Command+,",
+        click: () => sendOpenSettingsEvent(),
+        label: "Settings...",
+      },
+      { type: "separator" },
+      { role: "services" },
+      { type: "separator" },
+      { role: "hide" },
+      { role: "hideOthers" },
+      { role: "unhide" },
+      { type: "separator" },
+      { role: "quit" },
+    ];
+
+    template.push({
+      label: app.name,
+      submenu: appSubmenu,
+    });
+  }
+
+  const fileSubmenu: Electron.MenuItemConstructorOptions[] = [
+    ...(!isMac
+      ? [
+          {
+            accelerator: "Ctrl+,",
+            click: () => sendOpenSettingsEvent(),
+            label: "Settings...",
+          },
+          { type: "separator" as const },
+        ]
+      : []),
+    { role: isMac ? "close" : "quit" },
+  ];
+
+  const editSubmenu: Electron.MenuItemConstructorOptions[] = [
+    { role: "undo" },
+    { role: "redo" },
+    { type: "separator" },
+    { role: "cut" },
+    { role: "copy" },
+    { role: "paste" },
+    { role: "selectAll" },
+  ];
+
+  const viewSubmenu: Electron.MenuItemConstructorOptions[] = [
+    { role: "reload" },
+    { role: "forceReload" },
+    { role: "toggleDevTools" },
+    { type: "separator" },
+    { role: "resetZoom" },
+    { role: "zoomIn" },
+    { role: "zoomOut" },
+    { type: "separator" },
+    { role: "togglefullscreen" },
+  ];
+
+  const windowSubmenu: Electron.MenuItemConstructorOptions[] = [
+    { role: "minimize" },
+    { role: "zoom" },
+    ...(isMac
+      ? [{ type: "separator" as const }, { role: "front" as const }]
+      : [{ role: "close" as const }]),
+  ];
+
+  template.push(
+    {
+      label: "File",
+      submenu: fileSubmenu,
+    },
+    {
+      label: "Edit",
+      submenu: editSubmenu,
+    },
+    {
+      label: "View",
+      submenu: viewSubmenu,
+    },
+    {
+      label: "Window",
+      submenu: windowSubmenu,
+    },
+  );
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   const savedState = store.get("windowState");
 
@@ -370,6 +475,19 @@ ipcMain.handle("project:restore-last", async () => {
     return null;
   }
 });
+
+ipcMain.handle("app-settings:load", async () => {
+  return sanitizeApplicationSettings(store.get("applicationSettings"));
+});
+
+ipcMain.handle(
+  "app-settings:save",
+  async (_event, nextSettings: ApplicationSettings) => {
+    const sanitizedSettings = sanitizeApplicationSettings(nextSettings);
+    store.set("applicationSettings", sanitizedSettings);
+    return sanitizedSettings;
+  },
+);
 
 ipcMain.handle("project:open-folder", async () => {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? win ?? undefined;
@@ -709,4 +827,7 @@ app.on("activate", () => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  setApplicationMenu();
+  createWindow();
+});
