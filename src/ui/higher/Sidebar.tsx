@@ -1,5 +1,25 @@
 import {
-	ArrowUpDown,
+	injectSetiFont,
+	resolveFileIcon,
+	toSetiGlyph,
+} from "@/extensions/theme-seti/file-icons";
+import type { NativeContextMenuItem } from "@/lib/native-context-menu";
+import type {
+	GitFileStatus,
+	GitStatusMap,
+	ProjectNode,
+	ProjectNodeKind,
+	ProjectSnapshot,
+} from "@/lib/project-files";
+import {
+	type SidebarSortOrder,
+	type SidebarViewNode,
+	buildSidebarTree,
+	flattenSidebarTree,
+	matchesViewPath,
+} from "@/lib/sidebar-tree";
+import { Button } from "@/ui/lower/Button";
+import {
 	ChevronDown,
 	ChevronRight,
 	Copy,
@@ -13,17 +33,6 @@ import {
 	X,
 } from "lucide-react";
 import * as React from "react";
-import { injectSetiFont, resolveFileIcon, toSetiGlyph } from "@/extensions/theme-seti/file-icons";
-import type { NativeContextMenuItem } from "@/lib/native-context-menu";
-import type { GitFileStatus, GitStatusMap, ProjectNode, ProjectNodeKind, ProjectSnapshot } from "@/lib/project-files";
-import {
-	buildSidebarTree,
-	flattenSidebarTree,
-	matchesViewPath,
-	type SidebarSortOrder,
-	type SidebarViewNode,
-} from "@/lib/sidebar-tree";
-import { Button } from "@/ui/lower/Button";
 
 const HIDDEN_ENTRIES = new Set([
 	".git",
@@ -131,13 +140,20 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 	onOpenProjectFolder: () => void | Promise<void>;
 	onRefresh: () => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
+	onPreviewNode: (node: ProjectNode) => void | Promise<void>;
 	onBeginCreate: (kind: ProjectNodeKind, targetPath?: string) => void;
 	onCreateNode: (name: string) => void | Promise<void>;
-	onCopyNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
+	onCopyNode: (
+		sourcePath: string,
+		targetDirectoryPath: string,
+	) => void | Promise<void>;
 	onBeginRename: (targetPath: string) => void;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
-	onMoveNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
+	onMoveNode: (
+		sourcePath: string,
+		targetDirectoryPath: string,
+	) => void | Promise<void>;
 	onCancelInlineState: () => void;
 	onSelectNode: (node: ProjectNode) => void;
 	onRevealPath: (targetPath: string) => void;
@@ -196,7 +212,12 @@ function buildContextMenuItems(
 		items.push(
 			{ type: "action", id: "copy", label: "Copy", accelerator: "CmdOrCtrl+C" },
 			{ type: "action", id: "rename", label: "Rename", accelerator: "Enter" },
-			{ type: "action", id: "delete", label: "Delete", accelerator: "Backspace" },
+			{
+				type: "action",
+				id: "delete",
+				label: "Delete",
+				accelerator: "Backspace",
+			},
 		);
 	}
 
@@ -217,6 +238,14 @@ function InlineNameForm({
 	onSubmit: (value: string) => void | Promise<void>;
 }) {
 	const [value, setValue] = React.useState(initialValue);
+	const inputRef = React.useRef<HTMLInputElement>(null);
+
+	React.useEffect(() => {
+		if (autoFocus) {
+			inputRef.current?.focus();
+			inputRef.current?.select();
+		}
+	}, [autoFocus]);
 
 	return (
 		<form
@@ -227,7 +256,7 @@ function InlineNameForm({
 			}}
 		>
 			<input
-				autoFocus={autoFocus}
+				ref={inputRef}
 				value={value}
 				onBlur={() => {
 					if (!value.trim()) {
@@ -263,6 +292,7 @@ function ProjectTree({
 	onFocusTree,
 	onMoveNode,
 	onOpenNode,
+	onPreviewNode,
 	onOpenContextMenu,
 	onRenameNode,
 	onSelectNode,
@@ -283,8 +313,12 @@ function ProjectTree({
 	onCreateNode: (name: string) => void | Promise<void>;
 	onDeleteNode: (targetPath: string) => void | Promise<void>;
 	onFocusTree: () => void;
-	onMoveNode: (sourcePath: string, targetDirectoryPath: string) => void | Promise<void>;
+	onMoveNode: (
+		sourcePath: string,
+		targetDirectoryPath: string,
+	) => void | Promise<void>;
 	onOpenNode: (node: ProjectNode) => void | Promise<void>;
+	onPreviewNode: (node: ProjectNode) => void | Promise<void>;
 	onOpenContextMenu: (node: SidebarViewNode, x: number, y: number) => void;
 	onRenameNode: (name: string) => void | Promise<void>;
 	onSelectNode: (node: ProjectNode) => void;
@@ -298,14 +332,19 @@ function ProjectTree({
 	const isSelected = matchesViewPath(node, selectedPath);
 	const isActiveFile = activeFilePath === node.path;
 	const isRenaming = renamingPath === node.path;
-	const showInlineCreate = pendingCreate?.parentPath === node.path && isDirectory;
+	const showInlineCreate =
+		pendingCreate?.parentPath === node.path && isDirectory;
 	const hasNestedChildren = node.nestedChildren.length > 0;
 	const isNestedExpanded = expandedNestedPaths.has(node.path);
 
 	const fileGitStatus = gitStatus[node.path] as GitFileStatus | undefined;
-	const dirGitStatus = isDirectory ? getDirectoryGitStatus(node.node, gitStatus) : null;
+	const dirGitStatus = isDirectory
+		? getDirectoryGitStatus(node.node, gitStatus)
+		: null;
 	const effectiveGitStatus = fileGitStatus ?? dirGitStatus;
-	const gitColorClass = effectiveGitStatus ? GIT_STATUS_COLORS[effectiveGitStatus] : "";
+	const gitColorClass = effectiveGitStatus
+		? GIT_STATUS_COLORS[effectiveGitStatus]
+		: "";
 
 	const handleDragStart = React.useCallback(
 		(event: React.DragEvent) => {
@@ -331,7 +370,11 @@ function ProjectTree({
 		(event: React.DragEvent) => {
 			event.preventDefault();
 			const sourcePath = event.dataTransfer.getData("text/plain");
-			if (!sourcePath || sourcePath === node.path || node.path.startsWith(`${sourcePath}/`)) {
+			if (
+				!sourcePath ||
+				sourcePath === node.path ||
+				node.path.startsWith(`${sourcePath}/`)
+			) {
 				return;
 			}
 
@@ -393,9 +436,7 @@ function ProjectTree({
 				{isRenaming ? (
 					<div className="flex min-w-0 flex-1 items-center gap-2">
 						{renderLeadingToggle()}
-						{!isDirectory ? (
-							<FileIcon fileName={node.name} />
-						) : null}
+						{!isDirectory ? <FileIcon fileName={node.name} /> : null}
 						<InlineNameForm
 							initialValue={node.name}
 							label="Rename"
@@ -410,6 +451,17 @@ function ProjectTree({
 						onMouseDown={onFocusTree}
 						onClick={() => {
 							onSelectNode(node.node);
+							if (isDirectory) {
+								void onOpenNode(node.node);
+								return;
+							}
+							void onPreviewNode(node.node);
+						}}
+						onDoubleClick={() => {
+							if (isDirectory) {
+								return;
+							}
+							onSelectNode(node.node);
 							void onOpenNode(node.node);
 						}}
 						onContextMenu={(event) => {
@@ -418,7 +470,10 @@ function ProjectTree({
 							onOpenContextMenu(node, event.clientX, event.clientY);
 						}}
 						onKeyDown={(event) => {
-							if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+							if (
+								event.key === "ContextMenu" ||
+								(event.shiftKey && event.key === "F10")
+							) {
 								event.preventDefault();
 								const rect = event.currentTarget.getBoundingClientRect();
 								onOpenContextMenu(node, rect.left + 12, rect.bottom + 4);
@@ -426,18 +481,20 @@ function ProjectTree({
 						}}
 					>
 						{renderLeadingToggle()}
-						{!isDirectory ? (
-							<FileIcon fileName={node.name} />
-						) : null}
+						{!isDirectory ? <FileIcon fileName={node.name} /> : null}
 						<span
 							className={`min-w-0 flex-1 truncate ${
-								isDirectory && dirGitStatus ? GIT_STATUS_COLORS[dirGitStatus] : gitColorClass
+								isDirectory && dirGitStatus
+									? GIT_STATUS_COLORS[dirGitStatus]
+									: gitColorClass
 							}`}
 						>
 							{node.displayName}
 						</span>
 						{fileGitStatus ? (
-							<span className={`ml-auto shrink-0 text-[10px] font-semibold ${GIT_STATUS_COLORS[fileGitStatus]}`}>
+							<span
+								className={`ml-auto shrink-0 text-[10px] font-semibold ${GIT_STATUS_COLORS[fileGitStatus]}`}
+							>
 								{GIT_STATUS_LABELS[fileGitStatus]}
 							</span>
 						) : null}
@@ -477,6 +534,7 @@ function ProjectTree({
 							onFocusTree={onFocusTree}
 							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
+							onPreviewNode={onPreviewNode}
 							onOpenContextMenu={onOpenContextMenu}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
@@ -496,7 +554,9 @@ function ProjectTree({
 									pendingCreate.kind === "file" ? "untitled.tsx" : "new-folder"
 								}
 								label={
-									pendingCreate.kind === "file" ? "New file name" : "New folder name"
+									pendingCreate.kind === "file"
+										? "New file name"
+										: "New folder name"
 								}
 								onCancel={onCancelInlineState}
 								onSubmit={onCreateNode}
@@ -525,6 +585,7 @@ function ProjectTree({
 							onFocusTree={onFocusTree}
 							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
+							onPreviewNode={onPreviewNode}
 							onOpenContextMenu={onOpenContextMenu}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
@@ -555,6 +616,7 @@ export function Sidebar({
 	onDeleteNode,
 	onMoveNode,
 	onOpenNode,
+	onPreviewNode,
 	onOpenProjectFolder,
 	onRefresh,
 	onRenameNode,
@@ -565,12 +627,16 @@ export function Sidebar({
 	renamingPath,
 	selectedPath,
 }: SidebarProps) {
-	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
-	const [expandedNestedPaths, setExpandedNestedPaths] = React.useState<Set<string>>(new Set());
+	const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(
+		null,
+	);
+	const [expandedNestedPaths, setExpandedNestedPaths] = React.useState<
+		Set<string>
+	>(new Set());
 	const [filter, setFilter] = React.useState("");
 	const [showSearch, setShowSearch] = React.useState(false);
 	const [clipboardPath, setClipboardPath] = React.useState<string | null>(null);
-	const [sortOrder, setSortOrder] = React.useState<SidebarSortOrder>(() => {
+	const [sortOrder] = React.useState<SidebarSortOrder>(() => {
 		if (typeof window === "undefined") {
 			return "default";
 		}
@@ -602,10 +668,13 @@ export function Sidebar({
 		[expandedNestedPaths, expandedPaths, treeNodes],
 	);
 	const selectedEntryIndex = React.useMemo(
-		() => flatEntries.findIndex((entry) => matchesViewPath(entry.node, selectedPath)),
+		() =>
+			flatEntries.findIndex((entry) =>
+				matchesViewPath(entry.node, selectedPath),
+			),
 		[flatEntries, selectedPath],
 	);
-	const canRenameOrDelete = Boolean(contextMenu?.node && contextMenu.node.node.parentPath);
+	const canRenameOrDelete = Boolean(contextMenu?.node?.node.parentPath);
 
 	const focusTree = React.useCallback(() => {
 		treeRef.current?.focus();
@@ -791,7 +860,8 @@ export function Sidebar({
 
 			if (key === "ArrowDown") {
 				event.preventDefault();
-				const nextEntry = flatEntries[Math.min(currentIndex + 1, flatEntries.length - 1)];
+				const nextEntry =
+					flatEntries[Math.min(currentIndex + 1, flatEntries.length - 1)];
 				if (nextEntry) {
 					onSelectNode(nextEntry.node.node);
 				}
@@ -810,7 +880,10 @@ export function Sidebar({
 			if (key === "ArrowRight") {
 				event.preventDefault();
 				if (currentEntry.node.kind === "directory") {
-					if (!expandedPaths.has(currentEntry.node.path) && currentEntry.node.children.length > 0) {
+					if (
+						!expandedPaths.has(currentEntry.node.path) &&
+						currentEntry.node.children.length > 0
+					) {
 						void onOpenNode(currentEntry.node.node);
 						return;
 					}
@@ -869,9 +942,19 @@ export function Sidebar({
 				return;
 			}
 
-			if (key === "Enter" || key === " ") {
+			if (key === "Enter") {
 				event.preventDefault();
 				void onOpenNode(currentEntry.node.node);
+				return;
+			}
+
+			if (key === " ") {
+				event.preventDefault();
+				if (currentEntry.node.kind === "directory") {
+					void onOpenNode(currentEntry.node.node);
+					return;
+				}
+				void onPreviewNode(currentEntry.node.node);
 				return;
 			}
 
@@ -918,6 +1001,7 @@ export function Sidebar({
 			expandedPaths,
 			flatEntries,
 			onOpenNode,
+			onPreviewNode,
 			onSelectNode,
 			pasteIntoTarget,
 			selectedEntryIndex,
@@ -925,11 +1009,17 @@ export function Sidebar({
 		],
 	);
 
-	const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 210) : 0;
-	const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 240) : 0;
+	const menuX = contextMenu
+		? Math.min(contextMenu.x, window.innerWidth - 210)
+		: 0;
+	const menuY = contextMenu
+		? Math.min(contextMenu.y, window.innerHeight - 240)
+		: 0;
 
 	return (
-		<div className={`flex h-full flex-col rounded-[16px] bg-panel ${className ?? ""}`}>
+		<div
+			className={`flex h-full flex-col rounded-[16px] bg-panel ${className ?? ""}`}
+		>
 			<div className="flex items-center justify-between border-b border-border-500 px-4 py-3">
 				<div className="min-w-0">
 					<div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground/45">
@@ -959,7 +1049,9 @@ export function Sidebar({
 						className="h-8 w-8"
 						aria-label="New file"
 						disabled={!project}
-						onClick={() => onBeginCreate("file", selectedPath ?? project?.roots[0]?.path)}
+						onClick={() =>
+							onBeginCreate("file", selectedPath ?? project?.roots[0]?.path)
+						}
 					>
 						<FilePlus className="h-4 w-4" />
 					</Button>
@@ -970,7 +1062,10 @@ export function Sidebar({
 						aria-label="New folder"
 						disabled={!project}
 						onClick={() =>
-							onBeginCreate("directory", selectedPath ?? project?.roots[0]?.path)
+							onBeginCreate(
+								"directory",
+								selectedPath ?? project?.roots[0]?.path,
+							)
 						}
 					>
 						<FolderPlus className="h-4 w-4" />
@@ -1037,7 +1132,6 @@ export function Sidebar({
 			<div
 				ref={treeRef}
 				className="min-h-0 flex-1 overflow-auto px-2 py-3 outline-none"
-				tabIndex={0}
 				onKeyDown={handleTreeKeyDown}
 			>
 				{project ? (
@@ -1057,6 +1151,7 @@ export function Sidebar({
 							onFocusTree={focusTree}
 							onMoveNode={onMoveNode}
 							onOpenNode={onOpenNode}
+							onPreviewNode={onPreviewNode}
 							onOpenContextMenu={openContextMenu}
 							onRenameNode={onRenameNode}
 							onSelectNode={onSelectNode}
@@ -1076,8 +1171,8 @@ export function Sidebar({
 								Open a project folder
 							</div>
 							<div className="mt-1 text-xs leading-5 text-foreground/55">
-								Load an initial folder to browse, create, rename, edit, and delete
-								files from the sidebar.
+								Load an initial folder to browse, create, rename, edit, and
+								delete files from the sidebar.
 							</div>
 						</div>
 						<Button onClick={() => void onOpenProjectFolder()}>
@@ -1099,7 +1194,9 @@ export function Sidebar({
 								type="button"
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
 								onClick={() =>
-									runMenuAction(() => onBeginCreate("file", contextMenu.node.path))
+									runMenuAction(() =>
+										onBeginCreate("file", contextMenu.node.path),
+									)
 								}
 							>
 								<FilePlus className="h-4 w-4" />
@@ -1121,7 +1218,9 @@ export function Sidebar({
 								<button
 									type="button"
 									className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
-									onClick={() => runMenuAction(() => pasteIntoTarget(contextMenu.node))}
+									onClick={() =>
+										runMenuAction(() => pasteIntoTarget(contextMenu.node))
+									}
 								>
 									<Copy className="h-4 w-4" />
 									Paste
@@ -1160,7 +1259,11 @@ export function Sidebar({
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-destructive-foreground/80 hover:bg-panel-500 hover:text-destructive-foreground"
 								onClick={() =>
 									runMenuAction(() => {
-										if (window.confirm(`Delete "${contextMenu.node.displayName}"?`)) {
+										if (
+											window.confirm(
+												`Delete "${contextMenu.node.displayName}"?`,
+											)
+										) {
 											return onDeleteNode(contextMenu.node.path);
 										}
 									})

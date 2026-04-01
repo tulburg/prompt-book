@@ -1,4 +1,3 @@
-import * as React from "react";
 import { createBrowserProjectBridge } from "@/lib/browser-project-bridge";
 import {
 	disposeModelsForPath,
@@ -15,6 +14,7 @@ import type {
 	ProjectPermissions,
 	ProjectSnapshot,
 } from "@/lib/project-files";
+import * as React from "react";
 
 interface PendingCreateState {
 	parentPath: string;
@@ -77,7 +77,10 @@ function getAncestorPaths(targetPath: string, rootPath: string): string[] {
 	return ancestors;
 }
 
-function findNode(nodes: ProjectNode[], targetPath: string): ProjectNode | null {
+function findNode(
+	nodes: ProjectNode[],
+	targetPath: string,
+): ProjectNode | null {
 	for (const node of nodes) {
 		if (node.path === targetPath) {
 			return node;
@@ -94,7 +97,8 @@ function findNode(nodes: ProjectNode[], targetPath: string): ProjectNode | null 
 
 function findRootForPath(project: ProjectSnapshot, targetPath: string) {
 	return project.roots.find(
-		(root) => targetPath === root.path || targetPath.startsWith(`${root.path}/`),
+		(root) =>
+			targetPath === root.path || targetPath.startsWith(`${root.path}/`),
 	);
 }
 
@@ -121,7 +125,10 @@ function updateNodeInTree(
 	});
 }
 
-function removeNodeFromTree(nodes: ProjectNode[], targetPath: string): ProjectNode[] {
+function removeNodeFromTree(
+	nodes: ProjectNode[],
+	targetPath: string,
+): ProjectNode[] {
 	return nodes
 		.filter((node) => node.path !== targetPath)
 		.map((node) => {
@@ -135,18 +142,30 @@ function removeNodeFromTree(nodes: ProjectNode[], targetPath: string): ProjectNo
 		});
 }
 
-function remapNodePaths(node: ProjectNode, oldPath: string, nextPath: string): ProjectNode {
+function remapNodePaths(
+	node: ProjectNode,
+	oldPath: string,
+	nextPath: string,
+): ProjectNode {
 	const mappedPath = node.path.replace(oldPath, nextPath);
 	return {
 		...node,
 		path: mappedPath,
-		parentPath: node.parentPath ? node.parentPath.replace(oldPath, nextPath) : null,
+		parentPath: node.parentPath
+			? node.parentPath.replace(oldPath, nextPath)
+			: null,
 		rootPath: node.rootPath.replace(oldPath, nextPath),
-		children: node.children?.map((child) => remapNodePaths(child, oldPath, nextPath)),
+		children: node.children?.map((child) =>
+			remapNodePaths(child, oldPath, nextPath),
+		),
 	};
 }
 
-function remapTreePaths(nodes: ProjectNode[], oldPath: string, nextPath: string): ProjectNode[] {
+function remapTreePaths(
+	nodes: ProjectNode[],
+	oldPath: string,
+	nextPath: string,
+): ProjectNode[] {
 	return nodes.map((node) => {
 		if (node.path === oldPath || node.path.startsWith(`${oldPath}/`)) {
 			return remapNodePaths(node, oldPath, nextPath);
@@ -170,7 +189,9 @@ function mergeWorkspaceRoots(
 	}
 
 	return nextRoots.map((nextRoot) => {
-		const currentRoot = currentRoots.find((root) => root.path === nextRoot.path);
+		const currentRoot = currentRoots.find(
+			(root) => root.path === nextRoot.path,
+		);
 		if (!currentRoot) {
 			return nextRoot;
 		}
@@ -193,13 +214,71 @@ function remapPathSet(paths: Set<string>, oldPath: string, nextPath: string) {
 	);
 }
 
-function isPathWithinWorkspace(project: ProjectSnapshot | null, targetPath: string | null) {
+function remapPathList(paths: string[], oldPath: string, nextPath: string) {
+	return paths.map((path) =>
+		path === oldPath || path.startsWith(`${oldPath}/`)
+			? path.replace(oldPath, nextPath)
+			: path,
+	);
+}
+
+function remapNullablePath(
+	targetPath: string | null,
+	oldPath: string,
+	nextPath: string,
+) {
+	if (!targetPath || !isSameOrDescendantPath(targetPath, oldPath)) {
+		return targetPath;
+	}
+
+	return targetPath.replace(oldPath, nextPath);
+}
+
+function remapFileStateMap(
+	fileStates: Record<string, ActiveFileState>,
+	oldPath: string,
+	nextPath: string,
+) {
+	return Object.fromEntries(
+		Object.entries(fileStates).map(([path, fileState]) => {
+			if (path === oldPath || path.startsWith(`${oldPath}/`)) {
+				const mappedPath = path.replace(oldPath, nextPath);
+				return [
+					mappedPath,
+					{
+						...fileState,
+						path: mappedPath,
+					},
+				];
+			}
+
+			return [path, fileState];
+		}),
+	);
+}
+
+function removeFileStateEntries(
+	fileStates: Record<string, ActiveFileState>,
+	targetPath: string,
+) {
+	return Object.fromEntries(
+		Object.entries(fileStates).filter(
+			([path]) => !isSameOrDescendantPath(path, targetPath),
+		),
+	);
+}
+
+function isPathWithinWorkspace(
+	project: ProjectSnapshot | null,
+	targetPath: string | null,
+) {
 	if (!project || !targetPath) {
 		return false;
 	}
 
 	return project.roots.some(
-		(root) => targetPath === root.path || targetPath.startsWith(`${root.path}/`),
+		(root) =>
+			targetPath === root.path || targetPath.startsWith(`${root.path}/`),
 	);
 }
 
@@ -218,13 +297,19 @@ function collectDirectoriesToResolve(
 			continue;
 		}
 
-		if (expandedPaths.has(node.path) && !node.isDirectoryResolved && !node.isLoading) {
+		if (
+			expandedPaths.has(node.path) &&
+			!node.isDirectoryResolved &&
+			!node.isLoading
+		) {
 			pathsToResolve.push(node.path);
 			continue;
 		}
 
 		if (node.children) {
-			pathsToResolve.push(...collectDirectoriesToResolve(node.children, expandedPaths));
+			pathsToResolve.push(
+				...collectDirectoriesToResolve(node.children, expandedPaths),
+			);
 		}
 	}
 
@@ -280,19 +365,57 @@ export function useProjectManager() {
 	const { error, isBootstrapping, project, setError, setProject } =
 		useInitialProject(projectBridge);
 	const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
-	const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
-	const [activeFile, setActiveFile] = React.useState<ActiveFileState | null>(null);
-	const [pendingCreate, setPendingCreate] = React.useState<PendingCreateState | null>(
+	const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(
+		new Set(),
+	);
+	const [fileStates, setFileStates] = React.useState<
+		Record<string, ActiveFileState>
+	>({});
+	const [openFilePaths, setOpenFilePaths] = React.useState<string[]>([]);
+	const [previewFilePath, setPreviewFilePath] = React.useState<string | null>(
 		null,
 	);
+	const [activeFilePath, setActiveFilePath] = React.useState<string | null>(
+		null,
+	);
+	const [pendingCreate, setPendingCreate] =
+		React.useState<PendingCreateState | null>(null);
 	const [renamingPath, setRenamingPath] = React.useState<string | null>(null);
 	const [isBusy, setIsBusy] = React.useState(false);
+	const fileStatesRef = React.useRef(fileStates);
+	const openFilePathsRef = React.useRef(openFilePaths);
+	const previewFilePathRef = React.useRef(previewFilePath);
+	const activeFilePathRef = React.useRef(activeFilePath);
+
+	fileStatesRef.current = fileStates;
+	openFilePathsRef.current = openFilePaths;
+	previewFilePathRef.current = previewFilePath;
+	activeFilePathRef.current = activeFilePath;
+
+	const activeFile = React.useMemo(
+		() => (activeFilePath ? (fileStates[activeFilePath] ?? null) : null),
+		[activeFilePath, fileStates],
+	);
+
+	const openFiles = React.useMemo(() => {
+		const visiblePaths = [...openFilePaths];
+		if (previewFilePath && !visiblePaths.includes(previewFilePath)) {
+			visiblePaths.push(previewFilePath);
+		}
+
+		return visiblePaths
+			.map((path) => fileStates[path])
+			.filter((file): file is ActiveFileState => Boolean(file));
+	}, [fileStates, openFilePaths, previewFilePath]);
 
 	React.useEffect(() => {
 		if (!project) {
 			setExpandedPaths(new Set());
 			setSelectedPath(null);
-			setActiveFile(null);
+			setFileStates({});
+			setOpenFilePaths([]);
+			setPreviewFilePath(null);
+			setActiveFilePath(null);
 			return;
 		}
 
@@ -303,23 +426,142 @@ export function useProjectManager() {
 			return getDefaultExpandedPaths(project);
 		});
 		setSelectedPath((current) =>
-			isPathWithinWorkspace(project, current) ? current : project.roots[0]?.path ?? null,
+			isPathWithinWorkspace(project, current)
+				? current
+				: (project.roots[0]?.path ?? null),
 		);
 
-		if (activeFile && !isPathWithinWorkspace(project, activeFile.path)) {
-			setActiveFile(null);
-		}
-	}, [activeFile, project]);
+		setFileStates((current) =>
+			Object.fromEntries(
+				Object.entries(current).filter(([path]) =>
+					isPathWithinWorkspace(project, path),
+				),
+			),
+		);
+		setOpenFilePaths((current) =>
+			current.filter((path) => isPathWithinWorkspace(project, path)),
+		);
+		setPreviewFilePath((current) =>
+			isPathWithinWorkspace(project, current) ? current : null,
+		);
+		setActiveFilePath((current) =>
+			isPathWithinWorkspace(project, current) ? current : null,
+		);
+	}, [project]);
 
 	const selectedNode = React.useMemo(
-		() => (project && selectedPath ? findNode(project.roots, selectedPath) : null),
+		() =>
+			project && selectedPath ? findNode(project.roots, selectedPath) : null,
 		[project, selectedPath],
+	);
+
+	const ensureFileLoaded = React.useCallback(
+		async (node: ProjectNode) => {
+			if (!projectBridge) {
+				setError(
+					FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.",
+				);
+				return false;
+			}
+
+			const existingFile = fileStatesRef.current[node.path];
+			setFileStates((current) => ({
+				...current,
+				[node.path]: existingFile
+					? {
+							...existingFile,
+							name: node.name,
+							permissions: node.permissions,
+						}
+					: createActiveFileState(
+							node.path,
+							node.name,
+							"",
+							"",
+							node.permissions,
+							true,
+						),
+			}));
+
+			if (existingFile && !existingFile.isLoading) {
+				return true;
+			}
+
+			try {
+				const fileResult = await projectBridge.readFile(node.path);
+				const nextContent = getModelValue(node.path) ?? fileResult.content;
+				syncModel(node.path, nextContent);
+				setFileStates((current) => ({
+					...current,
+					[node.path]: createActiveFileState(
+						node.path,
+						node.name,
+						nextContent,
+						fileResult.content,
+						fileResult.permissions,
+					),
+				}));
+				return true;
+			} catch (readError) {
+				setFileStates((current) => {
+					const next = { ...current };
+					delete next[node.path];
+					return next;
+				});
+				setOpenFilePaths((current) =>
+					current.filter((path) => path !== node.path),
+				);
+				setPreviewFilePath((current) =>
+					current === node.path ? null : current,
+				);
+				setActiveFilePath((current) =>
+					current === node.path ? null : current,
+				);
+				setError(
+					readError instanceof Error
+						? readError.message
+						: "Failed to open the selected file.",
+				);
+				return false;
+			}
+		},
+		[projectBridge, setError],
+	);
+
+	const previewNode = React.useCallback(
+		async (node: ProjectNode) => {
+			setSelectedPath(node.path);
+			setError(null);
+
+			if (node.kind === "directory") {
+				setExpandedPaths((current) => {
+					const nextExpanded = new Set(current);
+					if (nextExpanded.has(node.path)) {
+						nextExpanded.delete(node.path);
+					} else {
+						nextExpanded.add(node.path);
+					}
+					return nextExpanded;
+				});
+				return;
+			}
+
+			setActiveFilePath(node.path);
+			if (!openFilePathsRef.current.includes(node.path)) {
+				setPreviewFilePath(node.path);
+			}
+
+			await ensureFileLoaded(node);
+		},
+		[ensureFileLoaded, setError],
 	);
 
 	const loadDirectory = React.useCallback(
 		async (directoryPath: string) => {
 			if (!projectBridge) {
-				setError(FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.");
+				setError(
+					FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.",
+				);
 				return;
 			}
 
@@ -341,14 +583,18 @@ export function useProjectManager() {
 					current
 						? {
 								...current,
-								roots: updateNodeInTree(current.roots, directoryPath, (node) => ({
-									...node,
-									children: listing.children,
-									isDirectoryResolved: true,
-									isLoading: false,
-									modifiedAt: listing.modifiedAt ?? node.modifiedAt,
-									permissions: listing.permissions,
-								})),
+								roots: updateNodeInTree(
+									current.roots,
+									directoryPath,
+									(node) => ({
+										...node,
+										children: listing.children,
+										isDirectoryResolved: true,
+										isLoading: false,
+										modifiedAt: listing.modifiedAt ?? node.modifiedAt,
+										permissions: listing.permissions,
+									}),
+								),
 							}
 						: current,
 				);
@@ -357,10 +603,14 @@ export function useProjectManager() {
 					current
 						? {
 								...current,
-								roots: updateNodeInTree(current.roots, directoryPath, (node) => ({
-									...node,
-									isLoading: false,
-								})),
+								roots: updateNodeInTree(
+									current.roots,
+									directoryPath,
+									(node) => ({
+										...node,
+										isLoading: false,
+									}),
+								),
 							}
 						: current,
 				);
@@ -379,7 +629,10 @@ export function useProjectManager() {
 			return;
 		}
 
-		const pathsToResolve = collectDirectoriesToResolve(project.roots, expandedPaths);
+		const pathsToResolve = collectDirectoriesToResolve(
+			project.roots,
+			expandedPaths,
+		);
 		for (const directoryPath of pathsToResolve) {
 			void loadDirectory(directoryPath);
 		}
@@ -393,10 +646,15 @@ export function useProjectManager() {
 			}));
 			setExpandedPaths((current) => {
 				const nextExpanded =
-					current.size > 0 ? new Set(current) : getDefaultExpandedPaths(nextProject);
+					current.size > 0
+						? new Set(current)
+						: getDefaultExpandedPaths(nextProject);
 				for (const root of nextProject.roots) {
 					nextExpanded.add(root.path);
-					for (const ancestor of getAncestorPaths(preferredPath ?? root.path, root.path)) {
+					for (const ancestor of getAncestorPaths(
+						preferredPath ?? root.path,
+						root.path,
+					)) {
 						nextExpanded.add(ancestor);
 					}
 				}
@@ -409,7 +667,9 @@ export function useProjectManager() {
 
 	const openProjectFolder = React.useCallback(async () => {
 		if (!projectBridge) {
-			setError(FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.");
+			setError(
+				FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.",
+			);
 			return;
 		}
 
@@ -418,10 +678,10 @@ export function useProjectManager() {
 		try {
 			const openedProject = await projectBridge.openProjectFolder();
 			if (openedProject) {
-					applyProjectSnapshot(
-						openedProject,
-						selectedPath ?? openedProject.roots[0]?.path ?? null,
-					);
+				applyProjectSnapshot(
+					openedProject,
+					selectedPath ?? openedProject.roots[0]?.path ?? null,
+				);
 			}
 		} catch (openError) {
 			setError(
@@ -446,7 +706,10 @@ export function useProjectManager() {
 				const refreshedProject = await projectBridge.refreshProject();
 				applyProjectSnapshot(
 					refreshedProject,
-					preferredPath ?? selectedPath ?? refreshedProject.roots[0]?.path ?? null,
+					preferredPath ??
+						selectedPath ??
+						refreshedProject.roots[0]?.path ??
+						null,
 				);
 			} catch (refreshError) {
 				setError(
@@ -480,52 +743,97 @@ export function useProjectManager() {
 			}
 
 			if (!projectBridge) {
-				setError(FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.");
+				setError(
+					FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.",
+				);
 				return;
 			}
 
-			setActiveFile(createActiveFileState(node.path, node.name, "", "", node.permissions, true));
-
-			try {
-				const fileResult = await projectBridge.readFile(node.path);
-				const nextContent = getModelValue(node.path) ?? fileResult.content;
-				syncModel(node.path, nextContent);
-				setActiveFile(
-					createActiveFileState(
-						node.path,
-						node.name,
-						nextContent,
-						fileResult.content,
-						fileResult.permissions,
-					),
-				);
-			} catch (readError) {
-				setActiveFile(null);
-				setError(
-					readError instanceof Error
-						? readError.message
-						: "Failed to open the selected file.",
-				);
-			}
+			setActiveFilePath(node.path);
+			setOpenFilePaths((current) =>
+				current.includes(node.path) ? current : [...current, node.path],
+			);
+			setPreviewFilePath((current) => (current === node.path ? null : current));
+			await ensureFileLoaded(node);
 		},
-		[projectBridge, setError],
+		[ensureFileLoaded, projectBridge, setError],
 	);
 
-	const selectNode = React.useCallback((node: ProjectNode) => {
-		setSelectedPath(node.path);
-		setError(null);
+	const activateFile = React.useCallback(
+		(path: string) => {
+			setActiveFilePath(path);
+			setSelectedPath(path);
+			setError(null);
+		},
+		[setError],
+	);
+
+	const pinFile = React.useCallback(
+		(path: string) => {
+			setOpenFilePaths((current) =>
+				current.includes(path) ? current : [...current, path],
+			);
+			setPreviewFilePath((current) => (current === path ? null : current));
+			setActiveFilePath(path);
+			setSelectedPath(path);
+			setError(null);
+		},
+		[setError],
+	);
+
+	const closeFile = React.useCallback((path: string) => {
+		const visiblePaths = [...openFilePathsRef.current];
+		if (
+			previewFilePathRef.current &&
+			!visiblePaths.includes(previewFilePathRef.current)
+		) {
+			visiblePaths.push(previewFilePathRef.current);
+		}
+
+		const closingIndex = visiblePaths.indexOf(path);
+		const nextVisiblePaths = visiblePaths.filter(
+			(filePath) => filePath !== path,
+		);
+		const nextActivePath =
+			activeFilePathRef.current === path
+				? (nextVisiblePaths[closingIndex] ??
+					nextVisiblePaths[closingIndex - 1] ??
+					nextVisiblePaths[0] ??
+					null)
+				: activeFilePathRef.current;
+
+		setOpenFilePaths((current) =>
+			current.filter((filePath) => filePath !== path),
+		);
+		setPreviewFilePath((current) => (current === path ? null : current));
+		setActiveFilePath(nextActivePath);
+		if (activeFilePathRef.current === path && nextActivePath) {
+			setSelectedPath(nextActivePath);
+		}
 	}, []);
 
+	const selectNode = React.useCallback(
+		(node: ProjectNode) => {
+			setSelectedPath(node.path);
+			setError(null);
+		},
+		[setError],
+	);
+
 	const updateActiveFileContent = React.useCallback((content: string) => {
-		setActiveFile((current) => {
-			if (!current) {
+		setFileStates((current) => {
+			const path = activeFilePathRef.current;
+			if (!path || !current[path]) {
 				return current;
 			}
 
-			updateModelContent(current.path, content);
+			updateModelContent(path, content);
 			return {
 				...current,
-				content,
+				[path]: {
+					...current[path],
+					content,
+				},
 			};
 		});
 	}, []);
@@ -539,17 +847,25 @@ export function useProjectManager() {
 		setError(null);
 		try {
 			const nextContent = getModelValue(activeFile.path) ?? activeFile.content;
-			const result = await projectBridge.writeFile(activeFile.path, nextContent);
-			setActiveFile((current) =>
-				current
-					? {
-							...current,
-							content: nextContent,
-							savedContent: nextContent,
-							permissions: result.permissions,
-						}
-					: current,
+			const result = await projectBridge.writeFile(
+				activeFile.path,
+				nextContent,
 			);
+			setFileStates((current) => {
+				if (!current[activeFile.path]) {
+					return current;
+				}
+
+				return {
+					...current,
+					[activeFile.path]: {
+						...current[activeFile.path],
+						content: nextContent,
+						savedContent: nextContent,
+						permissions: result.permissions,
+					},
+				};
+			});
 		} catch (writeError) {
 			setError(
 				writeError instanceof Error
@@ -567,16 +883,21 @@ export function useProjectManager() {
 				return;
 			}
 
-			const targetNode = targetPath ? findNode(project.roots, targetPath) : null;
+			const targetNode = targetPath
+				? findNode(project.roots, targetPath)
+				: null;
 			const targetRoot = targetPath
 				? findRootForPath(project, targetPath)
-				: project.roots[0] ?? null;
+				: (project.roots[0] ?? null);
 			const parentPath =
 				targetNode?.kind === "directory"
 					? targetNode.path
 					: targetNode?.path
-						? targetNode.parentPath ?? targetRoot?.path ?? project.roots[0]?.path ?? null
-						: targetRoot?.path ?? project.roots[0]?.path ?? null;
+						? (targetNode.parentPath ??
+							targetRoot?.path ??
+							project.roots[0]?.path ??
+							null)
+						: (targetRoot?.path ?? project.roots[0]?.path ?? null);
 
 			if (!parentPath) {
 				return;
@@ -606,7 +927,11 @@ export function useProjectManager() {
 			try {
 				const result =
 					pendingCreate.kind === "file"
-						? await projectBridge.createFile(pendingCreate.parentPath, trimmedName, "")
+						? await projectBridge.createFile(
+								pendingCreate.parentPath,
+								trimmedName,
+								"",
+							)
 						: await projectBridge.createFolder(
 								pendingCreate.parentPath,
 								trimmedName,
@@ -637,7 +962,10 @@ export function useProjectManager() {
 			setIsBusy(true);
 			setError(null);
 			try {
-				const result = await projectBridge.copyPath(sourcePath, targetDirectoryPath);
+				const result = await projectBridge.copyPath(
+					sourcePath,
+					targetDirectoryPath,
+				);
 				await loadDirectory(result.parentPath);
 				setExpandedPaths((current) => new Set(current).add(result.parentPath));
 				setSelectedPath(result.node.path);
@@ -674,7 +1002,10 @@ export function useProjectManager() {
 			setIsBusy(true);
 			setError(null);
 			try {
-				const result = await projectBridge.renamePath(renamingPath, trimmedName);
+				const result = await projectBridge.renamePath(
+					renamingPath,
+					trimmedName,
+				);
 				const nextPath = result.node.path;
 
 				renameModels(renamingPath, nextPath);
@@ -686,26 +1017,31 @@ export function useProjectManager() {
 							}
 						: current,
 				);
-				setExpandedPaths((current) => remapPathSet(current, renamingPath, nextPath));
+				setExpandedPaths((current) =>
+					remapPathSet(current, renamingPath, nextPath),
+				);
 				setSelectedPath((current) =>
 					current === renamingPath || current?.startsWith(`${renamingPath}/`)
 						? current.replace(renamingPath, nextPath)
 						: current,
 				);
-
-				if (activeFile?.path && isSameOrDescendantPath(activeFile.path, renamingPath)) {
-					const nextActivePath = activeFile.path.replace(renamingPath, nextPath);
-					setActiveFile((current) =>
-						current
-							? {
-									...current,
-									path: nextActivePath,
-									name:
-										current.path === renamingPath ? trimmedName : current.name,
-								}
-							: current,
-					);
-				}
+				setFileStates((current) => {
+					const nextStates = remapFileStateMap(current, renamingPath, nextPath);
+					const renamedFile = nextStates[nextPath];
+					if (renamedFile && renamingPath === result.oldPath) {
+						nextStates[nextPath] = { ...renamedFile, name: trimmedName };
+					}
+					return nextStates;
+				});
+				setOpenFilePaths((current) =>
+					remapPathList(current, renamingPath, nextPath),
+				);
+				setPreviewFilePath((current) =>
+					remapNullablePath(current, renamingPath, nextPath),
+				);
+				setActiveFilePath((current) =>
+					remapNullablePath(current, renamingPath, nextPath),
+				);
 
 				if (result.parentPath) {
 					await loadDirectory(result.parentPath);
@@ -721,7 +1057,7 @@ export function useProjectManager() {
 				setIsBusy(false);
 			}
 		},
-		[activeFile?.path, loadDirectory, project, projectBridge, renamingPath, setError],
+		[loadDirectory, project, projectBridge, renamingPath, setError, setProject],
 	);
 
 	const moveNode = React.useCallback(
@@ -733,7 +1069,10 @@ export function useProjectManager() {
 			setIsBusy(true);
 			setError(null);
 			try {
-				const result = await projectBridge.movePath(sourcePath, targetDirectoryPath);
+				const result = await projectBridge.movePath(
+					sourcePath,
+					targetDirectoryPath,
+				);
 				const nextPath = result.node.path;
 
 				renameModels(sourcePath, nextPath);
@@ -755,17 +1094,23 @@ export function useProjectManager() {
 					return next;
 				});
 				setSelectedPath(nextPath);
+				setFileStates((current) =>
+					remapFileStateMap(current, sourcePath, nextPath),
+				);
+				setOpenFilePaths((current) =>
+					remapPathList(current, sourcePath, nextPath),
+				);
+				setPreviewFilePath((current) =>
+					remapNullablePath(current, sourcePath, nextPath),
+				);
+				setActiveFilePath((current) =>
+					remapNullablePath(current, sourcePath, nextPath),
+				);
 
-				if (activeFile?.path && isSameOrDescendantPath(activeFile.path, sourcePath)) {
-					const nextActivePath = activeFile.path.replace(sourcePath, nextPath);
-					setActiveFile((current) =>
-						current
-							? { ...current, path: nextActivePath }
-							: current,
-					);
-				}
-
-				const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
+				const sourceParent = sourcePath.substring(
+					0,
+					sourcePath.lastIndexOf("/"),
+				);
 				if (sourceParent) {
 					await loadDirectory(sourceParent);
 				}
@@ -780,7 +1125,7 @@ export function useProjectManager() {
 				setIsBusy(false);
 			}
 		},
-		[activeFile?.path, loadDirectory, project, projectBridge, setError],
+		[loadDirectory, project, projectBridge, setError, setProject],
 	);
 
 	const revealPath = React.useCallback(
@@ -814,7 +1159,8 @@ export function useProjectManager() {
 			setError(null);
 			try {
 				const result = await projectBridge.deletePath(targetPath);
-				const nextSelection = result.parentPath ?? project.roots[0]?.path ?? null;
+				const nextSelection =
+					result.parentPath ?? project.roots[0]?.path ?? null;
 
 				disposeModelsForPath(targetPath);
 				setProject((current) =>
@@ -834,10 +1180,20 @@ export function useProjectManager() {
 					}
 					return nextExpanded;
 				});
-
-				if (activeFile?.path && isSameOrDescendantPath(activeFile.path, targetPath)) {
-					setActiveFile(null);
-				}
+				setFileStates((current) => removeFileStateEntries(current, targetPath));
+				setOpenFilePaths((current) =>
+					current.filter((path) => !isSameOrDescendantPath(path, targetPath)),
+				);
+				setPreviewFilePath((current) =>
+					current && isSameOrDescendantPath(current, targetPath)
+						? null
+						: current,
+				);
+				setActiveFilePath((current) =>
+					current && isSameOrDescendantPath(current, targetPath)
+						? null
+						: current,
+				);
 
 				setSelectedPath(nextSelection);
 				if (result.parentPath) {
@@ -855,13 +1211,16 @@ export function useProjectManager() {
 				setIsBusy(false);
 			}
 		},
-		[activeFile?.path, loadDirectory, project, projectBridge, setError],
+		[loadDirectory, project, projectBridge, setError, setProject],
 	);
 
 	return {
 		activeFile,
+		activeFilePath,
+		activateFile,
 		beginCreate,
 		beginRename,
+		closeFile,
 		copyNode,
 		createNode,
 		deleteNode,
@@ -870,7 +1229,11 @@ export function useProjectManager() {
 		isBootstrapping,
 		isBusy,
 		moveNode,
+		openFiles,
 		openNode,
+		pinFile,
+		previewFilePath,
+		previewNode,
 		projectBridge,
 		revealPath,
 		selectNode,

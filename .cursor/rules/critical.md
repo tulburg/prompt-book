@@ -11,6 +11,7 @@ DO NOT REVERT OR OVERWRITE MY CHANGES!
 
 - When i mention to check or get some inspiration from Codally. Use .sources/codally
 - Similarly when i mention serenity, Use .sources/serenity
+- And whenever i mention Claude, Use .sources/claude
 
 - WHENEVER YOU'RE COPYING FROM CODALLY, DO NOT COPY THE FRAMEWORK. ALWAYS REWRITE THE FUNCTIONALITY INTO A REACT FUNCTION BASED IMPLEMENTATION LIKE HOOKS, RENDERS.
 

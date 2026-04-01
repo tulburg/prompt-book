@@ -1,107 +1,119 @@
-import * as React from "react";
-import { PromptEditor, ExplorerPanel, FrameHost, Header, Sidebar } from "@/ui";
 import Bus from "@/lib/bus";
 import { useGitStatus } from "@/lib/use-git-status";
 import { useProjectManager } from "@/lib/use-project-manager";
+import { ExplorerPanel, FrameHost, Header, PromptEditor, Sidebar } from "@/ui";
+import * as React from "react";
 
 export default function App() {
-  const projectManager = useProjectManager();
-  const gitStatus = useGitStatus(projectManager.project, projectManager.projectBridge);
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+	const projectManager = useProjectManager();
+	const gitStatus = useGitStatus(
+		projectManager.project,
+		projectManager.projectBridge,
+	);
+	const [sidebarOpen, setSidebarOpen] = React.useState(true);
 
-  React.useEffect(() => {
-    const handleSidebarToggle = () => {
-      setSidebarOpen((current) => !current);
-    };
+	React.useEffect(() => {
+		const handleSidebarToggle = () => {
+			setSidebarOpen((current) => !current);
+		};
 
-    Bus.on("sidebar:toggle", handleSidebarToggle);
+		Bus.on("sidebar:toggle", handleSidebarToggle);
 
-    return () => {
-      Bus.off("sidebar:toggle", handleSidebarToggle);
-    };
-  }, []);
+		return () => {
+			Bus.off("sidebar:toggle", handleSidebarToggle);
+		};
+	}, []);
 
-  return (
-    <div className="bg-panel flex h-screen w-screen flex-col">
-      <Header />
-      <FrameHost
-        id="main-layout"
-        storageKey="prompt-book-layout"
-        className="h-screen w-screen"
-        panels={[
-          ...(sidebarOpen
-            ? [
-                {
-                  id: "sidebar",
-                  minSize: 150,
-                  defaultSize: 12,
-                  children: (
-                    <Sidebar
-                      activeFilePath={projectManager.activeFile?.path ?? null}
-                      error={projectManager.error}
-                      expandedPaths={projectManager.expandedPaths}
-                      gitStatus={gitStatus}
-                      isBusy={projectManager.isBusy || projectManager.isBootstrapping}
-                      onBeginCreate={projectManager.beginCreate}
-                      onBeginRename={projectManager.beginRename}
-                      onCancelInlineState={() => {
-                        projectManager.setPendingCreate(null);
-                        projectManager.setRenamingPath(null);
-                      }}
-                      onCopyNode={projectManager.copyNode}
-                      onCreateNode={projectManager.createNode}
-                      onDeleteNode={projectManager.deleteNode}
-                      onMoveNode={projectManager.moveNode}
-                      onOpenNode={projectManager.openNode}
-                      onOpenProjectFolder={projectManager.openProjectFolder}
-                      onRefresh={() => projectManager.refreshProject()}
-                      onRenameNode={projectManager.renameNode}
-                      onRevealPath={projectManager.revealPath}
-                      onSelectNode={projectManager.selectNode}
-                      pendingCreate={projectManager.pendingCreate}
-                      project={projectManager.project}
-                      renamingPath={projectManager.renamingPath}
-                      selectedPath={projectManager.selectedPath}
-                    />
-                  ),
-                },
-              ]
-            : []),
-          {
-            id: "editor",
-            minSize: 250,
-            defaultSize: 45,
-            children: (
-              <PromptEditor
-                activeFile={projectManager.activeFile}
-                isBusy={projectManager.isBusy}
-                onChange={projectManager.updateActiveFileContent}
-                onOpenProjectFolder={projectManager.openProjectFolder}
-                onSave={projectManager.saveActiveFile}
-                project={projectManager.project}
-                selectedNode={projectManager.selectedNode}
-              />
-            ),
-          },
-          {
-            id: "explorer",
-            minSize: 100,
-            defaultSize: 15,
-            children: (
-              <ExplorerPanel
-                isBusy={projectManager.isBusy}
-                onBeginCreate={projectManager.beginCreate}
-                onBeginRename={projectManager.beginRename}
-                onDeleteNode={projectManager.deleteNode}
-                onOpenProjectFolder={projectManager.openProjectFolder}
-                onRefresh={() => projectManager.refreshProject()}
-                project={projectManager.project}
-                selectedNode={projectManager.selectedNode}
-              />
-            ),
-          },
-        ]}
-      />
-    </div>
-  );
+	return (
+		<div className="bg-panel flex h-screen w-screen flex-col">
+			<Header />
+			<FrameHost
+				id="main-layout"
+				storageKey="prompt-book-layout"
+				className="h-screen w-screen"
+				panels={[
+					...(sidebarOpen
+						? [
+								{
+									id: "sidebar",
+									minSize: 150,
+									defaultSize: 12,
+									children: (
+										<Sidebar
+											activeFilePath={projectManager.activeFilePath}
+											error={projectManager.error}
+											expandedPaths={projectManager.expandedPaths}
+											gitStatus={gitStatus}
+											isBusy={
+												projectManager.isBusy || projectManager.isBootstrapping
+											}
+											onBeginCreate={projectManager.beginCreate}
+											onBeginRename={projectManager.beginRename}
+											onCancelInlineState={() => {
+												projectManager.setPendingCreate(null);
+												projectManager.setRenamingPath(null);
+											}}
+											onCopyNode={projectManager.copyNode}
+											onCreateNode={projectManager.createNode}
+											onDeleteNode={projectManager.deleteNode}
+											onMoveNode={projectManager.moveNode}
+											onOpenNode={projectManager.openNode}
+											onPreviewNode={projectManager.previewNode}
+											onOpenProjectFolder={projectManager.openProjectFolder}
+											onRefresh={() => projectManager.refreshProject()}
+											onRenameNode={projectManager.renameNode}
+											onRevealPath={projectManager.revealPath}
+											onSelectNode={projectManager.selectNode}
+											pendingCreate={projectManager.pendingCreate}
+											project={projectManager.project}
+											renamingPath={projectManager.renamingPath}
+											selectedPath={projectManager.selectedPath}
+										/>
+									),
+								},
+							]
+						: []),
+					{
+						id: "editor",
+						minSize: 250,
+						defaultSize: 45,
+						children: (
+							<PromptEditor
+								activeFile={projectManager.activeFile}
+								activeFilePath={projectManager.activeFilePath}
+								isBusy={projectManager.isBusy}
+								onChange={projectManager.updateActiveFileContent}
+								onActivateFile={projectManager.activateFile}
+								onCloseFile={projectManager.closeFile}
+								onOpenProjectFolder={projectManager.openProjectFolder}
+								onPinFile={projectManager.pinFile}
+								onSave={projectManager.saveActiveFile}
+								openFiles={projectManager.openFiles}
+								previewFilePath={projectManager.previewFilePath}
+								project={projectManager.project}
+								selectedNode={projectManager.selectedNode}
+							/>
+						),
+					},
+					{
+						id: "explorer",
+						minSize: 100,
+						defaultSize: 15,
+						children: (
+							<ExplorerPanel
+								isBusy={projectManager.isBusy}
+								onBeginCreate={projectManager.beginCreate}
+								onBeginRename={projectManager.beginRename}
+								onDeleteNode={projectManager.deleteNode}
+								onOpenProjectFolder={projectManager.openProjectFolder}
+								onRefresh={() => projectManager.refreshProject()}
+								project={projectManager.project}
+								selectedNode={projectManager.selectedNode}
+							/>
+						),
+					},
+				]}
+			/>
+		</div>
+	);
 }
