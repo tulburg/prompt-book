@@ -136,7 +136,7 @@ export function PromptEditor({
                 <div
                   key={file.path}
                   className={cn(
-                    "group relative flex h-[35px] min-w-0 items-center gap-1.5 border-r border-border-500/50 pl-3 pr-1 text-[13px] transition-colors",
+                    "group relative flex h-[35px] items-center gap-1.5 border-r border-border-500/50 pl-3 pr-1 text-[13px] transition-colors",
                     isActive
                       ? "bg-panel-600 text-foreground"
                       : "bg-panel-700 text-foreground/60 hover:text-foreground/80",
