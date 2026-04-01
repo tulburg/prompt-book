@@ -181,7 +181,7 @@ export function Settings({
   return (
     <div className="h-full min-h-0 bg-panel-700">
       <div className="flex h-full min-h-0">
-        <aside className="hidden w-60 shrink-0 border-r border-border-500 bg-panel px-3 py-6 lg:block">
+        <aside className="hidden w-60 shrink-0 border-r border-border-500 bg-panel-700 px-3 py-6 lg:block">
           <div className="px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground/45">
             Settings
           </div>
