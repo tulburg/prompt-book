@@ -1,8 +1,5 @@
 import { MonacoEditor } from "@/components/editor/MonacoEditor";
-import {
-  resolveFileIcon,
-  toSetiGlyph,
-} from "@/extensions/theme-seti/file-icons";
+import { FileIcon } from "@/components/FileIcon";
 import {
   SETTINGS_EDITOR_PATH,
   type ApplicationSettingDescriptor,
@@ -20,38 +17,11 @@ import {
   FileCode2,
   FolderOpen,
   Save,
-  Settings as SettingsIcon,
   X,
 } from "lucide-react";
 import * as React from "react";
 
 import { Settings } from "./Settings";
-
-function TabFileIcon({ fileName }: { fileName: string }) {
-  if (fileName === "Settings") {
-    return <SettingsIcon className="h-4 w-4 shrink-0 text-foreground/50" />;
-  }
-
-  const icon = resolveFileIcon(fileName, false);
-  if (!icon) return null;
-  const glyph = toSetiGlyph(icon.character);
-  if (!glyph) return null;
-
-  return (
-    <span
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
-      style={{
-        fontFamily: "seti",
-        fontSize: "16px",
-        color: icon.color,
-        lineHeight: 1,
-        WebkitFontSmoothing: "antialiased",
-      }}
-    >
-      {glyph}
-    </span>
-  );
-}
 
 interface PromptEditorProps
   extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
@@ -148,7 +118,7 @@ export function PromptEditor({
                       : "bg-panel-700 text-foreground/60 hover:text-foreground/80",
                   )}
                 >
-                  <TabFileIcon fileName={file.name} />
+                  <FileIcon fileName={file.name} />
                   <button
                     type="button"
                     onClick={() => onActivateFile(file.path)}

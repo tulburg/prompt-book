@@ -1,4 +1,5 @@
 import * as React from "react";
+import { FileIcon } from "@/components/FileIcon";
 import type { ChatMessage } from "@/lib/chat/types";
 import type {
   ChatToolDisplay,
@@ -7,7 +8,7 @@ import type {
   DiffHunk,
   JsonObject,
 } from "@/lib/chat/tools/tool-types";
-import { SquareTerminal, Terminal, TerminalSquare } from "lucide-react";
+import { ScanSearch, Search, SquareTerminal } from "lucide-react";
 
 /* ── Primitives ── */
 
@@ -20,7 +21,7 @@ function CodeBlock({
 }) {
   return (
     <pre
-      className="overflow-x-auto rounded border border-border-500 bg-panel-500 px-3 py-2 text-[11.5px] leading-relaxed text-foreground font-mono"
+      className="overflow-x-auto py-2 text-[11.5px] leading-relaxed text-foreground font-mono"
       style={maxHeight ? { maxHeight, overflow: "auto" } : undefined}
     >
       <code>{children}</code>
@@ -128,6 +129,50 @@ function shortenPath(path: string): string {
   return `…/${parts.slice(-2).join("/")}`;
 }
 
+function extractFileNameFromPathLike(value: string | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || /^[a-z]+:\/\//i.test(trimmed)) return null;
+
+  const normalized = trimmed.replace(/\\/g, "/");
+  const fileName = normalized.split("/").pop() || normalized;
+  if (!fileName) return null;
+
+  if (
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    /\.[a-z0-9_-]+$/i.test(fileName) ||
+    fileName === "Settings"
+  ) {
+    return fileName;
+  }
+
+  return null;
+}
+
+function getIOCardFileName(
+  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
+): string | null {
+  try {
+    const parsed = JSON.parse(display.input) as Record<string, unknown>;
+    const pathValue =
+      (typeof parsed.file_path === "string" && parsed.file_path) ||
+      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
+      undefined;
+    const fromInput = extractFileNameFromPathLike(pathValue);
+    if (fromInput) {
+      return fromInput;
+    }
+  } catch {
+    // Ignore non-JSON tool inputs and fall back to title/subtitle heuristics.
+  }
+
+  return (
+    extractFileNameFromPathLike(display.title) ??
+    extractFileNameFromPathLike(display.subtitle)
+  );
+}
+
 /* ── Card wrapper (Codally-style bordered tool card) ── */
 
 function ToolCard({
@@ -199,12 +244,9 @@ function TerminalCard({
         <span className="min-w-0 text-[12px] text-foreground truncate">
           {headerLabel.split(/`([^`]+)`/).map((part, i) =>
             i % 2 === 1 ? (
-              <code
-                key={i}
-                className="rounded px-1 py-0.5 font-mono text-[11px]"
-              >
+              <span key={i} className="rounded py-0.5 text-[11px]">
                 {part}
-              </code>
+              </span>
             ) : (
               <span key={i}>{part}</span>
             ),
@@ -348,32 +390,24 @@ function IOCard({
   toolName: string;
 }) {
   const [expanded, setExpanded] = React.useState(display.isError === true);
-  const title = display.title || toolName;
+  // const title = display.title || toolName;
   const hasOutput = Boolean(display.output);
+  const fileName = getIOCardFileName(display);
 
   return (
     <ToolCard>
       <ToolCardHeader onClick={() => setExpanded(!expanded)} clickable>
-        <StatusDot status={display.isError ? "error" : "success"} />
-        <span className="min-w-0 truncate text-[12px] text-foreground">
-          {title}
+        {fileName ? <FileIcon fileName={fileName} /> : null}
+        <span className="min-w-0 truncate text-[12px] -ml-1 text-foreground">
+          {fileName}
         </span>
-        {display.subtitle && (
-          <span className="text-[10px] text-placeholder truncate">
-            {display.subtitle}
-          </span>
-        )}
-        <ChevronIcon expanded={expanded} />
+        {display.isError && <StatusDot status={"error"} />}
+        <ChevronIcon expanded={expanded} className="ml-auto" />
       </ToolCardHeader>
       {expanded && (
         <div className="border-t border-border-500 px-2.5 py-2 space-y-2">
-          <CollapsibleSection label="Input">
-            <CodeBlock maxHeight="200px">{display.input}</CodeBlock>
-          </CollapsibleSection>
           {hasOutput && (
-            <CollapsibleSection label="Output" defaultOpen={display.isError}>
-              <CodeBlock maxHeight="300px">{display.output!}</CodeBlock>
-            </CollapsibleSection>
+            <CodeBlock maxHeight="300px">{display.output!}</CodeBlock>
           )}
         </div>
       )}
@@ -404,23 +438,16 @@ function ListCard({
   return (
     <ToolCard>
       <ToolCardHeader onClick={() => setExpanded(!expanded)} clickable>
-        <span className="text-green-400 text-[12px]">✓</span>
+        <Search className="size-3 text-foreground/50" />
         <span className="min-w-0 truncate text-[12px] text-foreground">
           {title}
         </span>
-        <span className="text-[10px] text-placeholder">
-          {count} result{count !== 1 ? "s" : ""}
-        </span>
-        {display.subtitle && (
-          <span className="text-[10px] text-placeholder truncate">
-            {display.subtitle}
-          </span>
-        )}
-        <ChevronIcon expanded={expanded} />
+
+        <ChevronIcon expanded={expanded} className="ml-auto" />
       </ToolCardHeader>
       {expanded && (
         <div className="border-t border-border-500 max-h-[300px] overflow-y-auto">
-          <div className="divide-y divide-border-500">
+          <div className="divide-y divide-border-500/50">
             {items.map((item) => (
               <div key={item.value} className="px-2.5 py-1.5 text-[11.5px]">
                 <div className="text-foreground break-all font-mono">

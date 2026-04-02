@@ -1,8 +1,7 @@
 import {
 	injectSetiFont,
-	resolveFileIcon,
-	toSetiGlyph,
 } from "@/extensions/theme-seti/file-icons";
+import { FileIcon } from "@/components/FileIcon";
 import type { NativeContextMenuItem } from "@/lib/native-context-menu";
 import type {
 	GitFileStatus,
@@ -86,33 +85,6 @@ function getDirectoryGitStatus(
 	return Object.keys(gitStatus).some((path) => path.startsWith(prefix))
 		? "modified"
 		: null;
-}
-
-function FileIcon({ fileName }: { fileName: string }) {
-	const icon = resolveFileIcon(fileName, false);
-	if (!icon) {
-		return null;
-	}
-
-	const glyph = toSetiGlyph(icon.character);
-	if (!glyph) {
-		return null;
-	}
-
-	return (
-		<span
-			className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
-			style={{
-				fontFamily: "seti",
-				fontSize: "16px",
-				color: icon.color,
-				lineHeight: 1,
-				WebkitFontSmoothing: "antialiased",
-			}}
-		>
-			{glyph}
-		</span>
-	);
 }
 
 interface PendingCreateState {
