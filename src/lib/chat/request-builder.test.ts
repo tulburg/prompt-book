@@ -59,17 +59,17 @@ describe("request builder", () => {
 		});
 
 		expect(request.format).toBe("anthropic");
-		expect(request.messages).toHaveLength(3);
-		expect(request.messages[0]?.content[0]?.text).toContain("<system-reminder>");
-		expect(request.messages[1]).toMatchObject({
+		expect(request.messages).toHaveLength(2);
+		expect(request.messages[0]).toMatchObject({
 			role: "user",
 			content: [{ type: "text", text: "Hello there" }],
 		});
-		expect(request.messages[2]).toMatchObject({
+		expect(request.messages[1]).toMatchObject({
 			role: "assistant",
 			content: [{ type: "text", text: "Final answer" }],
 		});
-		expect(request.system.join("\n")).toContain("<system-context>");
+		expect(request.system.join("\n")).toContain("# Runtime Context");
+		expect(request.system.join("\n")).toContain("# User Context");
 	});
 
 	it("switches qwen models to plain role-based context formatting", () => {
@@ -108,6 +108,49 @@ describe("request builder", () => {
 				content: [{ type: "text", text: "Hello there" }],
 			},
 		]);
+		expect(request.system.join("\n")).toContain("# Runtime Context");
+		expect(request.system.join("\n")).toContain("# User Context");
+		expect(request.system.join("\n")).not.toContain("<system-context>");
+	});
+
+	it("uses openai profile formatting without collapsing system sections", () => {
+		const session: ChatSessionState = {
+			id: "session-openai",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "openai/gpt-oss-20b",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Hello there",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "openai/gpt-oss-20b",
+			modelName: "GPT OSS 20B",
+		});
+
+		expect(request.format).toBe("openai");
+		expect(request.messages).toEqual([
+			{
+				role: "user",
+				content: [{ type: "text", text: "Hello there" }],
+			},
+		]);
+		expect(request.system.length).toBeGreaterThan(1);
 		expect(request.system.join("\n")).toContain("# Runtime Context");
 		expect(request.system.join("\n")).toContain("# User Context");
 		expect(request.system.join("\n")).not.toContain("<system-context>");

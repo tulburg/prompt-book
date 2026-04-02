@@ -14,9 +14,11 @@ export function buildLlamaServerArgs({
 		port,
 		// Keep local chat rendering aligned with the model's Jinja chat template.
 		"--jinja",
-		// We want plain assistant text in content, not provider-specific reasoning fields.
+		// Extract reasoning/thinking into reasoning_content so it doesn't appear
+		// in the main content, but still allow the model to think (required by
+		// thinking models like Qwen3-Coder). "none" breaks these models entirely.
 		"--reasoning-format",
-		"none",
+		"deepseek",
 		// Never treat prior assistant content as a continuation prefill.
 		"--no-prefill-assistant",
 	];

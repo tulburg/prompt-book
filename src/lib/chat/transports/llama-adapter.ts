@@ -1,39 +1,11 @@
+import {
+	buildLMStudioChatCompletionRequest,
+	filterModelTextContent,
+	toUserFacingLMStudioServerErrorMessage,
+} from "../lm-studio-chat-codec";
 import type { AnthropicRequest, ChatTransportEvent } from "../types";
 
 const DEFAULT_SERVER_URL = "http://localhost:8123";
-
-interface LlamaChatCompletionRequest {
-	model: string;
-	messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-	stream: boolean;
-}
-
-function flattenBlocks(
-	content: string | Array<{ type?: string; text?: string }> | undefined | null,
-): string {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) {
-		return content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("");
-	}
-	return "";
-}
-
-export function buildLlamaChatPayload(request: AnthropicRequest): LlamaChatCompletionRequest {
-	const systemText = request.system.join("\n\n");
-	const messages: LlamaChatCompletionRequest["messages"] = [
-		{ role: "system", content: systemText },
-		...request.messages.map((message) => ({
-			role: message.role,
-			content: message.content.map((block) => block.text).join(""),
-		})),
-	];
-
-	return {
-		model: request.model,
-		messages,
-		stream: request.stream,
-	};
-}
 
 export class LlamaChatAdapter {
 	async *stream(
@@ -41,17 +13,31 @@ export class LlamaChatAdapter {
 		options: { signal: AbortSignal; serverUrl?: string },
 	): AsyncGenerator<ChatTransportEvent> {
 		const baseUrl = (options.serverUrl || DEFAULT_SERVER_URL).replace(/\/$/, "");
-		const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+		const lmsPayload = buildLMStudioChatCompletionRequest(request);
+		const url = `${baseUrl}/v1/chat/completions`;
+		console.log("[LlamaAdapter] POST", url);
+		console.log("[LlamaAdapter] request.model:", request.model);
+		console.log("[LlamaAdapter] request.format:", request.format);
+		console.log("[LlamaAdapter] payload.model:", lmsPayload.model);
+		console.log("[LlamaAdapter] payload.stop:", lmsPayload.stop);
+		console.log("[LlamaAdapter] payload.messages:", lmsPayload.messages.map((m) => ({ role: m.role, contentLength: m.content.length, contentPreview: m.content.slice(0, 100) })));
+		console.log("[LlamaAdapter] FULL payload:", JSON.stringify(lmsPayload));
+		const response = await fetch(url, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(buildLlamaChatPayload(request)),
+			body: JSON.stringify(lmsPayload),
 			signal: options.signal,
 		});
 
+		console.log("[LlamaAdapter] response status:", response.status, "content-type:", response.headers.get("content-type"));
+
 		if (!response.ok) {
 			const errorText = await response.text().catch(() => "");
+			console.error("[LlamaAdapter] request failed:", response.status, errorText);
 			throw new Error(
-				`Chat request failed: HTTP ${response.status}${errorText ? ` — ${errorText}` : ""}`,
+				toUserFacingLMStudioServerErrorMessage(
+					`LM Studio chat completions request failed with status ${response.status}${errorText ? `: ${errorText}` : ""}`,
+				),
 			);
 		}
 
@@ -63,6 +49,7 @@ export class LlamaChatAdapter {
 			const reader = response.body!.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
+			let _sseFrameCount = 0;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -85,6 +72,11 @@ export class LlamaChatAdapter {
 
 					if (!data || data === "[DONE]") continue;
 
+					_sseFrameCount++;
+					if (_sseFrameCount <= 10) {
+						console.log(`[LlamaAdapter] SSE frame #${_sseFrameCount} raw:`, data.slice(0, 500));
+					}
+
 					try {
 						const parsed = JSON.parse(data) as {
 							choices?: Array<{
@@ -94,7 +86,21 @@ export class LlamaChatAdapter {
 						};
 						for (const choice of parsed.choices ?? []) {
 							const source = choice.delta ?? choice.message;
-							const raw = flattenBlocks(source?.content);
+							const beforeFilter =
+								typeof source?.content === "string"
+									? source.content
+									: Array.isArray(source?.content)
+										? source.content
+												.map((block) =>
+													typeof block?.text === "string" ? block.text : "",
+												)
+												.join("")
+										: "";
+							const raw = filterModelTextContent(beforeFilter);
+							if (_sseFrameCount <= 10) {
+								console.log(`[LlamaAdapter] SSE frame #${_sseFrameCount} content before filter: ${JSON.stringify(beforeFilter.slice(0, 200))}`);
+								console.log(`[LlamaAdapter] SSE frame #${_sseFrameCount} content after filter: ${JSON.stringify(raw.slice(0, 200))}`);
+							}
 							if (!raw) continue;
 							yield { type: "content_delta", text: raw };
 						}
@@ -103,6 +109,7 @@ export class LlamaChatAdapter {
 					}
 				}
 			}
+			console.log(`[LlamaAdapter] SSE stream ended, total frames: ${_sseFrameCount}`);
 		} else {
 			const payload = (await response.json()) as {
 				choices?: Array<{
@@ -111,7 +118,15 @@ export class LlamaChatAdapter {
 			};
 
 			for (const choice of payload.choices ?? []) {
-				const raw = flattenBlocks(choice.message?.content);
+				const raw = filterModelTextContent(
+					typeof choice.message?.content === "string"
+						? choice.message.content
+						: Array.isArray(choice.message?.content)
+							? choice.message.content
+									.map((block) => (typeof block?.text === "string" ? block.text : ""))
+									.join("")
+							: "",
+				);
 				if (!raw) continue;
 				yield { type: "content_delta", text: raw };
 			}

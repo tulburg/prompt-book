@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildLlamaChatPayload, LlamaChatAdapter } from "@/lib/chat/transports/llama-adapter";
+import {
+	buildLMStudioChatCompletionRequest,
+	filterModelTextContent,
+	toUserFacingLMStudioServerErrorMessage,
+} from "@/lib/chat/lm-studio-chat-codec";
+import { LlamaChatAdapter } from "@/lib/chat/transports/llama-adapter";
 import type { AnthropicRequest } from "@/lib/chat/types";
 
 describe("llama adapter", () => {
-	it("converts the internal Anthropic-shaped request into a llama payload", () => {
+	it("converts the internal request into an LM Studio payload", () => {
 		const request: AnthropicRequest = {
 			model: "local-model",
 			system: ["base system", "# Mode: Edit"],
@@ -27,18 +32,70 @@ describe("llama adapter", () => {
 			},
 		};
 
-		expect(buildLlamaChatPayload(request)).toEqual({
+		expect(buildLMStudioChatCompletionRequest(request)).toEqual({
 			model: "local-model",
 			stream: true,
+			temperature: 0.7,
+			stop: [],
 			messages: [
 				{ role: "system", content: "base system\n\n# Mode: Edit" },
 				{
 					role: "user",
-					content: "<system-reminder>\nmode: Edit\n</system-reminder>",
+					content: "<system-reminder>\nmode: Edit\n</system-reminder>\n\nUpdate this file",
 				},
-				{ role: "user", content: "Update this file" },
 			],
 		});
+	});
+
+	it("strips __SYSTEM_PROMPT_DYNAMIC_BOUNDARY__ from system sections", () => {
+		const request: AnthropicRequest = {
+			model: "qwen-model",
+			system: [
+				"# Identity\nYou are helpful.\n\n__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n\n# Mode: Agent",
+			],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "hi" }] },
+			],
+			stream: true,
+			format: "qwen",
+			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
+		};
+
+		const result = buildLMStudioChatCompletionRequest(request);
+		const systemContent = result.messages
+			.filter((m) => m.role === "system")
+			.map((m) => m.content)
+			.join("\n");
+		expect(systemContent).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
+		expect(systemContent).toContain("# Identity");
+		expect(systemContent).toContain("# Mode: Agent");
+	});
+
+	it("includes model-appropriate stop tokens for qwen format", () => {
+		const request: AnthropicRequest = {
+			model: "qwen-model",
+			system: ["system"],
+			messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+			stream: true,
+			format: "qwen",
+			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
+		};
+
+		const result = buildLMStudioChatCompletionRequest(request);
+		expect(result.stop).toContain("<|im_end|>");
+		expect(result.temperature).toBe(0.7);
+	});
+
+	it("filters LM Studio control tokens from model text", () => {
+		expect(filterModelTextContent("Hello<|assistant|> world<|end|>")).toBe("Hello world");
+	});
+
+	it("maps LM Studio prompt template mismatches to a clearer user error", () => {
+		expect(
+			toUserFacingLMStudioServerErrorMessage(
+				"LM Studio chat completions request failed with status 400: error rendering prompt with jinja template",
+			),
+		).toContain("could not format the conversation");
 	});
 });
 

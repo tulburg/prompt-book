@@ -37,15 +37,14 @@ describe("chat service", () => {
 		const body = JSON.parse(String(init.body)) as {
 			messages: Array<{ role: string; content: string }>;
 		};
-		const exactUserTurns = body.messages.filter(
-			(message) => message.role === "user" && message.content === "Hello there",
+		const userTurns = body.messages.filter(
+			(message) => message.role === "user" && message.content.includes("Hello there"),
 		);
+		const systemMessages = body.messages.filter((message) => message.role === "system");
 
-		expect(exactUserTurns).toHaveLength(1);
-		expect(body.messages[0]).toMatchObject({
-			role: "system",
-		});
-		expect(body.messages[0]?.content).toContain("# Mode: Ask");
+		expect(userTurns).toHaveLength(1);
+		expect(systemMessages.length).toBeGreaterThan(0);
+		expect(systemMessages.some((message) => message.content.includes("# Mode: Ask"))).toBe(true);
 		expect(service.activeSession?.messages.at(-1)?.content).toBe("Hello back");
 	});
 

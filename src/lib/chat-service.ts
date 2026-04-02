@@ -137,6 +137,16 @@ export class ChatService {
 			session = this.store.setSessionMode(session.id, options.mode) ?? session;
 		}
 
+		const resolvedModel = this._currentModel?.id ?? session.modelId ?? "default";
+		console.log("[ChatService] sendMessage:", {
+			content: content.slice(0, 80),
+			currentModelId: this._currentModel?.id ?? null,
+			currentModelName: this._currentModel?.displayName ?? null,
+			sessionModelId: session.modelId,
+			resolvedModel,
+			mode: session.mode,
+		});
+
 		const userMessage = createTranscriptEntry({
 			role: "user",
 			content,
@@ -159,7 +169,8 @@ export class ChatService {
 			const request = buildAnthropicRequest({
 				session,
 				queryContext,
-				model: this._currentModel?.id ?? session.modelId ?? "default",
+				model: resolvedModel,
+				modelName: this._currentModel?.displayName,
 			});
 
 			for await (const event of this.transport.stream(request, {

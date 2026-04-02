@@ -39,6 +39,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
 	const [downloadCatalog, setDownloadCatalog] = React.useState<LMSModelEntry[]>(LMS_MODEL_CATALOG_FALLBACK);
 	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, { progress: number; message: string }>>(new Map());
+	const [isLoadingModel, setIsLoadingModel] = React.useState(false);
 	const [streamingText, setStreamingText] = React.useState<string | null>(null);
 	const [modePickerPos, setModePickerPos] = React.useState<{ top: number; left: number } | null>(null);
 	const [modelPickerPos, setModelPickerPos] = React.useState<{ top: number; left: number } | null>(null);
@@ -60,6 +61,14 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				if (models.length > 0 && !selectedModel) {
 					setSelectedModel(models[0]);
 					chatService.currentModel = models[0];
+					setIsLoadingModel(true);
+					try {
+						await lmsServerService.loadModel(models[0].id);
+					} catch (error) {
+						console.error("Failed to load initial model:", error);
+					} finally {
+						setIsLoadingModel(false);
+					}
 				}
 			}
 		};
@@ -194,10 +203,22 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		setStreamingText(null);
 	};
 
-	const handleSelectModel = (model: LMSInstalledModelInfo) => {
+	const handleSelectModel = async (model: LMSInstalledModelInfo) => {
+		console.log("[ChatPanel] handleSelectModel:", model.id, model.displayName);
 		setSelectedModel(model);
 		chatService.currentModel = model;
 		setShowModelPicker(false);
+		setIsLoadingModel(true);
+		try {
+			console.log("[ChatPanel] calling loadModel...");
+			await lmsServerService.loadModel(model.id);
+			console.log("[ChatPanel] loadModel done ✓");
+		} catch (error) {
+			console.error("[ChatPanel] Failed to load model:", error);
+		} finally {
+			setIsLoadingModel(false);
+			console.log("[ChatPanel] isLoadingModel → false");
+		}
 	};
 
 	const handleDownloadModel = async (entry: LMSModelEntry) => {
@@ -329,6 +350,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 									setShowModelPicker(!showModelPicker);
 								}}
 							>
+								{isLoadingModel && <Loader2 className="h-3 w-3 animate-spin" />}
 								<span className="max-w-[120px] overflow-hidden text-ellipsis">
 									{selectedModel?.displayName ?? "No model"}
 								</span>
@@ -414,6 +436,14 @@ export function ChatPanel({ className }: ChatPanelProps) {
 												if (models.length > 0) {
 													setSelectedModel(models[0]);
 													chatService.currentModel = models[0];
+													setIsLoadingModel(true);
+													try {
+														await lmsServerService.loadModel(models[0].id);
+													} catch (error) {
+														console.error("Failed to load model:", error);
+													} finally {
+														setIsLoadingModel(false);
+													}
 												}
 											}}
 										>

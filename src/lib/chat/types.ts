@@ -61,7 +61,7 @@ export interface AnthropicRequest {
 	system: string[];
 	messages: AnthropicMessage[];
 	stream: boolean;
-	format: "anthropic" | "qwen";
+	format: "anthropic" | "openai" | "qwen" | "gemma";
 	metadata: {
 		sessionId: string;
 		mode: ChatMode;

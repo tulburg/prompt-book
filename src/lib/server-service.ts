@@ -94,8 +94,10 @@ export class LMSServerService {
 
 	async listInstalledModels(serverUrl?: string): Promise<LMSInstalledModelInfo[]> {
 		const baseUrl = this.normalizeServerUrl(serverUrl);
+		console.log("[LMS] listInstalledModels → GET", `${baseUrl}/models`);
 		const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(4000) });
 		if (!response.ok) {
+			console.error("[LMS] listInstalledModels failed:", response.status);
 			throw new Error(`GET /models failed with HTTP ${response.status}`);
 		}
 
@@ -104,8 +106,9 @@ export class LMSServerService {
 			| Array<{ id?: string; meta?: { max_context_length?: number; n_ctx_train?: number; multimodal?: boolean; tools?: boolean } }>;
 
 		const models = Array.isArray(payload) ? payload : payload.data ?? [];
+		console.log("[LMS] listInstalledModels raw response:", JSON.stringify(payload, null, 2));
 
-		return models
+		const result = models
 			.filter((model) => !!model.id)
 			.map((model) => {
 				const id = model.id!;
@@ -118,11 +121,36 @@ export class LMSServerService {
 					trainedForToolUse: model.meta?.tools,
 				};
 			});
+		console.log("[LMS] listInstalledModels result:", result.map((m) => m.id));
+		return result;
+	}
+
+	private async getModelStatus(baseUrl: string, modelId: string): Promise<string | null> {
+		try {
+			const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(4000) });
+			if (!response.ok) return null;
+			const payload = (await response.json()) as { data?: Array<{ id?: string; status?: { value?: string } }> };
+			const models = payload.data ?? [];
+			const match = models.find((m) => m.id === modelId);
+			return match?.status?.value ?? null;
+		} catch {
+			return null;
+		}
 	}
 
 	async loadModel(modelId: string, options: LMSLoadModelOptions = {}): Promise<void> {
 		const baseUrl = this.normalizeServerUrl(options.serverUrl);
 		const normalizedModelId = normalizePullModelId(modelId);
+
+		console.log("[LMS] loadModel called:", { modelId, normalizedModelId, baseUrl });
+
+		const existingStatus = await this.getModelStatus(baseUrl, normalizedModelId);
+		if (existingStatus === "loaded") {
+			console.log("[LMS] loadModel: already loaded, skipping");
+			this._onDidLoadProgress.fire(100);
+			this._onDidLoadModel.fire();
+			return;
+		}
 
 		this._onDidLoadProgress.fire(0);
 		let loadProgress = 0;
@@ -132,20 +160,48 @@ export class LMSServerService {
 		}, 400);
 
 		try {
-			const response = await fetch(`${baseUrl}/models/load`, {
+			const url = `${baseUrl}/models/load`;
+			const body = JSON.stringify({ model: normalizedModelId });
+			console.log("[LMS] loadModel → POST", url, body);
+			const response = await fetch(url, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ model: normalizedModelId }),
+				body,
 			});
+			const responseText = await response.text().catch(() => "");
+			console.log("[LMS] loadModel POST response:", { status: response.status, body: responseText });
 			if (!response.ok) {
-				const errorText = await response.text().catch(() => "");
-				if (!(response.status === 400 && /model is already loaded/i.test(errorText))) {
-					throw new Error(`Failed to load model: HTTP ${response.status}${errorText ? ` — ${errorText}` : ""}`);
+				if (!(response.status === 400 && /model is already loaded/i.test(responseText))) {
+					throw new Error(`Failed to load model: HTTP ${response.status}${responseText ? ` — ${responseText}` : ""}`);
+				}
+				console.log("[LMS] loadModel: already-loaded response, done");
+				this._onDidLoadProgress.fire(100);
+				this._onDidLoadModel.fire();
+				return;
+			}
+
+			console.log("[LMS] loadModel: waiting for model to finish loading...");
+			const deadline = Date.now() + 120_000;
+			while (Date.now() < deadline) {
+				await new Promise((r) => setTimeout(r, 1000));
+				const status = await this.getModelStatus(baseUrl, normalizedModelId);
+				console.log("[LMS] loadModel poll:", { modelId: normalizedModelId, status });
+				if (status === "loaded") {
+					console.log("[LMS] loadModel: model is now loaded ✓");
+					this._onDidLoadProgress.fire(100);
+					this._onDidLoadModel.fire();
+					return;
+				}
+				if (status === "unloaded") {
+					const failStatus = await this.getModelStatus(baseUrl, normalizedModelId);
+					throw new Error(`Model failed to load (status: ${failStatus ?? "unloaded"})`);
 				}
 			}
 
-			this._onDidLoadProgress.fire(100);
-			this._onDidLoadModel.fire();
+			throw new Error("Timed out waiting for model to load (120s)");
+		} catch (error) {
+			console.error("[LMS] loadModel error:", error);
+			throw error;
 		} finally {
 			clearInterval(timer);
 		}

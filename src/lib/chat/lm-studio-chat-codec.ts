@@ -1,0 +1,94 @@
+import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "./system-prompt";
+import type { AnthropicRequest } from "./types";
+
+export interface LMStudioChatMessage {
+	role: "system" | "user" | "assistant";
+	content: string;
+}
+
+export interface LMStudioChatCompletionRequest {
+	model: string;
+	messages: LMStudioChatMessage[];
+	stream: boolean;
+	temperature: number;
+	stop: string[];
+}
+
+function flattenBlocks(
+	content: string | Array<{ type?: string; text?: string }> | undefined | null,
+): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("");
+	}
+	return "";
+}
+
+function stripSentinels(text: string): string {
+	return text.replaceAll(SYSTEM_PROMPT_DYNAMIC_BOUNDARY, "").trim();
+}
+
+function mergeConsecutiveSameRole(messages: LMStudioChatMessage[]): LMStudioChatMessage[] {
+	const merged: LMStudioChatMessage[] = [];
+	for (const msg of messages) {
+		const prev = merged.at(-1);
+		if (prev && prev.role === msg.role) {
+			prev.content += `\n\n${msg.content}`;
+		} else {
+			merged.push({ ...msg });
+		}
+	}
+	return merged;
+}
+
+export function toLMStudioMessages(request: AnthropicRequest): LMStudioChatMessage[] {
+	const systemMessages = request.system
+		.map((content) => stripSentinels(content))
+		.filter((content) => content.length > 0)
+		.map((content) => ({
+			role: "system" as const,
+			content,
+		}));
+
+	const conversationMessages = request.messages.map((message) => ({
+		role: message.role as LMStudioChatMessage["role"],
+		content: flattenBlocks(message.content),
+	}));
+
+	return mergeConsecutiveSameRole([...systemMessages, ...conversationMessages]);
+}
+
+const STOP_SEQUENCES_BY_FORMAT: Record<AnthropicRequest["format"], string[]> = {
+	qwen: ["<|im_end|>", "<|endoftext|>"],
+	openai: ["<|im_end|>", "<|endoftext|>"],
+	gemma: ["<end_of_turn>", "<eos>"],
+	anthropic: [],
+};
+
+export function buildLMStudioChatCompletionRequest(
+	request: AnthropicRequest,
+): LMStudioChatCompletionRequest {
+	return {
+		model: request.model,
+		messages: toLMStudioMessages(request),
+		stream: request.stream,
+		temperature: 0.7,
+		stop: STOP_SEQUENCES_BY_FORMAT[request.format] ?? [],
+	};
+}
+
+export function filterModelTextContent(content: string): string {
+	return content.replace(/<\|[^|>]*\|>/g, "");
+}
+
+export function toUserFacingLMStudioServerErrorMessage(rawMessage: string): string {
+	if (/n_keep.*n_ctx|context.*length|token.*limit|context.*window|context size has been exceeded/i.test(rawMessage)) {
+		return "The selected model context window is too small for this conversation. Switch to a larger-context model or start a new chat.";
+	}
+
+	if (/error rendering prompt with jinja template|no user query found in messages/i.test(rawMessage)) {
+		return "This model could not format the conversation with its current prompt template. Start a new chat or switch to a compatible model/template.";
+	}
+
+	return "The local model failed to process this request. Try again, start a new chat, or switch to a different model.";
+}
