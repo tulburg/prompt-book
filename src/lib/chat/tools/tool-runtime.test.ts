@@ -81,6 +81,16 @@ describe("tool runtime", () => {
 		vi.restoreAllMocks();
 	});
 
+	it("allows reading files outside the workspace roots", async () => {
+		const files = new Map<string, string>([["/external/file.txt", "outside workspace"]]);
+		const context = await makeContext(files);
+
+		const result = await context.readFile("/external/file.txt");
+
+		expect(result.content).toBe("outside workspace");
+		expect(result.filePath).toBe("/external/file.txt");
+	});
+
 	it("rejects overwriting a file that changed after it was read", async () => {
 		const files = new Map<string, string>([["/workspace/file.txt", "original"]]);
 		const context = await makeContext(files);

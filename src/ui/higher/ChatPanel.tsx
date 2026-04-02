@@ -1,29 +1,39 @@
-import * as React from "react";
 import {
-	ChevronDown,
-	ImageIcon,
-	Mic,
-	Plus,
-	MoreHorizontal,
-	Clock,
-	Loader2,
-	Download,
-	AlertCircle,
-	Square,
-} from "lucide-react";
-import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-service";
-import type { PullProgressEvent } from "@/lib/model-downloads";
+	type ChatMessage,
+	type ChatSession,
+	chatService,
+} from "@/lib/chat-service";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
-import { llamaServerService, type LlamaInstalledModelInfo } from "@/lib/server-service";
 import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
+import type { ChatMode } from "@/lib/chat/types";
 import {
-	fetchModelCatalog,
 	LLAMA_MODEL_CATALOG_FALLBACK,
 	type LlamaModelEntry,
+	fetchModelCatalog,
 } from "@/lib/model-catalog";
-import type { ChatMode } from "@/lib/chat/types";
+import type { PullProgressEvent } from "@/lib/model-downloads";
+import {
+	type LlamaInstalledModelInfo,
+	llamaServerService,
+} from "@/lib/server-service";
+import { buildToolMessagePairingIndex } from "@/ui/higher/tool-message-pairing";
 import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
 import { Modal } from "@/ui/lower/Modal";
+import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
+import {
+	AlertCircle,
+	ChevronDown,
+	Clock,
+	Download,
+	ImageIcon,
+	Loader2,
+	Mic,
+	MoreHorizontal,
+	Plus,
+	Square,
+	X,
+} from "lucide-react";
+import * as React from "react";
 
 interface ChatPanelProps {
 	className?: string;
@@ -31,22 +41,39 @@ interface ChatPanelProps {
 
 export function ChatPanel({ className }: ChatPanelProps) {
 	const [sessions, setSessions] = React.useState<ChatSession[]>([]);
-	const [activeSession, setActiveSession] = React.useState<ChatSession | null>(null);
+	const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
+		null,
+	);
 	const [inputValue, setInputValue] = React.useState("");
 	const [isStreaming, setIsStreaming] = React.useState(false);
-	const [installedModels, setInstalledModels] = React.useState<LlamaInstalledModelInfo[]>([]);
-	const [selectedModel, setSelectedModel] = React.useState<LlamaInstalledModelInfo | null>(null);
-	const [serverStatus, setServerStatus] = React.useState<"stopped" | "starting" | "running" | "error">("stopped");
+	const [installedModels, setInstalledModels] = React.useState<
+		LlamaInstalledModelInfo[]
+	>([]);
+	const [selectedModel, setSelectedModel] =
+		React.useState<LlamaInstalledModelInfo | null>(null);
+	const [serverStatus, setServerStatus] = React.useState<
+		"stopped" | "starting" | "running" | "error"
+	>("stopped");
 	const [showModelPicker, setShowModelPicker] = React.useState(false);
 	const [showModePicker, setShowModePicker] = React.useState(false);
 	const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
 	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
-	const [downloadCatalog, setDownloadCatalog] = React.useState<LlamaModelEntry[]>(LLAMA_MODEL_CATALOG_FALLBACK);
-	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, PullProgressEvent>>(new Map());
+	const [downloadCatalog, setDownloadCatalog] = React.useState<
+		LlamaModelEntry[]
+	>(LLAMA_MODEL_CATALOG_FALLBACK);
+	const [downloadProgress, setDownloadProgress] = React.useState<
+		Map<string, PullProgressEvent>
+	>(new Map());
 	const [isLoadingModel, setIsLoadingModel] = React.useState(false);
 	const [streamingText, setStreamingText] = React.useState<string | null>(null);
-	const [modePickerPos, setModePickerPos] = React.useState<{ top: number; left: number } | null>(null);
-	const [modelPickerPos, setModelPickerPos] = React.useState<{ top: number; left: number } | null>(null);
+	const [modePickerPos, setModePickerPos] = React.useState<{
+		top: number;
+		left: number;
+	} | null>(null);
+	const [modelPickerPos, setModelPickerPos] = React.useState<{
+		top: number;
+		left: number;
+	} | null>(null);
 	const messagesEndRef = React.useRef<HTMLDivElement>(null);
 	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 	const modelPickerRef = React.useRef<HTMLDivElement>(null);
@@ -127,7 +154,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				downloadDismissTimersRef.current.delete(event.modelId);
 			}
 
-			if (event.phase === "complete" || event.phase === "error" || event.phase === "cancelled") {
+			if (
+				event.phase === "complete" ||
+				event.phase === "error" ||
+				event.phase === "cancelled"
+			) {
 				const timeoutId = window.setTimeout(() => {
 					setDownloadProgress((prev) => {
 						const next = new Map(prev);
@@ -169,10 +200,18 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	React.useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
 			const target = e.target as Node;
-			if (showModelPicker && modelPickerRef.current && !modelPickerRef.current.contains(target)) {
+			if (
+				showModelPicker &&
+				modelPickerRef.current &&
+				!modelPickerRef.current.contains(target)
+			) {
 				setShowModelPicker(false);
 			}
-			if (showModePicker && modePickerRef.current && !modePickerRef.current.contains(target)) {
+			if (
+				showModePicker &&
+				modePickerRef.current &&
+				!modePickerRef.current.contains(target)
+			) {
 				setShowModePicker(false);
 			}
 		};
@@ -249,7 +288,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const handleDownloadModel = async (entry: LlamaModelEntry) => {
 		setShowDownloadPanel(false);
 		try {
-			const installedModel = await llamaServerService.pullModel(entry.id, entry.quantization);
+			const installedModel = await llamaServerService.pullModel(
+				entry.id,
+				entry.quantization,
+			);
 			const models = await chatService.getInstalledModels();
 			setInstalledModels(models);
 			if (installedModel) {
@@ -286,7 +328,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const getDownloadEntryName = React.useCallback(
 		(modelId: string) =>
 			downloadCatalog.find((entry) => entry.id === modelId)?.name ??
-			modelId.split("/").pop()?.replace(/-GGUF$/i, "").replace(/-/g, " ") ??
+			modelId
+				.split("/")
+				.pop()
+				?.replace(/-GGUF$/i, "")
+				.replace(/-/g, " ") ??
 			modelId,
 		[downloadCatalog],
 	);
@@ -301,29 +347,60 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const messages = activeSession?.messages ?? [];
 	const visibleStreamingText = streamingText;
 	const activeDownloads = Array.from(downloadProgress.values());
+	const toolMessagePairing = React.useMemo(
+		() => buildToolMessagePairingIndex(messages),
+		[messages],
+	);
 
 	return (
-		<div className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}>
+		<div
+			className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
+		>
 			{/* Tab bar */}
 			<div className="flex h-[35px] shrink-0 items-center justify-between border-b border-border-500 px-1">
-				<div className="flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none">
+				<TinyScrollArea
+					direction="horizontal"
+					className="min-w-0 flex-1"
+					contentClassName="flex items-center"
+				>
 					{sessions.map((session) => (
-						<button
+						<div
 							key={session.id}
-							className={`cursor-pointer whitespace-nowrap border-b-2 border-transparent bg-transparent px-3 py-1.5 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
-							onClick={() => {
-								chatService.setActiveSession(session.id);
-								activeSessionIdRef.current = session.id;
-								setActiveSession(chatService.activeSession);
-								setStreamingText(null);
-							}}
+							className={`group flex items-center gap-1 border-b-2 border-transparent bg-transparent pl-3 pr-1 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
 						>
-							{session.title}
-						</button>
+							<button
+								type="button"
+								className="cursor-pointer whitespace-nowrap bg-transparent py-1.5 text-left"
+								onClick={() => {
+									chatService.setActiveSession(session.id);
+									activeSessionIdRef.current = session.id;
+									setActiveSession(chatService.activeSession);
+									setStreamingText(null);
+								}}
+							>
+								{session.title}
+							</button>
+							<button
+								type="button"
+								className={`rounded p-0.5 transition-colors hover:bg-border-500 hover:text-foreground ${session.id === activeSession?.id ? "text-foreground/50" : "text-transparent group-hover:text-foreground/35"}`}
+								onClick={(event) => {
+									event.stopPropagation();
+									chatService.closeSession(session.id);
+									setStreamingText(null);
+								}}
+								aria-label={`Close ${session.title}`}
+								title={`Close ${session.title}`}
+							>
+								<X className="h-3.5 w-3.5" />
+							</button>
+						</div>
 					))}
-				</div>
+				</TinyScrollArea>
 				<div className="flex shrink-0 items-center gap-0.5 px-1">
-					<button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground" onClick={handleNewChat}>
+					<button
+						className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+						onClick={handleNewChat}
+					>
 						<Plus className="h-3.5 w-3.5" />
 					</button>
 					<button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
@@ -349,95 +426,112 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					/>
 					<div className="flex items-center justify-between gap-1.5 pt-0.5">
 						<div className="flex min-w-0 flex-1 items-center gap-1">
-						{/* Mode picker */}
-						<div className="relative" ref={modePickerRef}>
-							<button
-								ref={modeButtonRef}
-								className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
-								onClick={() => {
-									if (!showModePicker && modeButtonRef.current) {
-										const rect = modeButtonRef.current.getBoundingClientRect();
-										setModePickerPos({ top: rect.bottom + 4, left: rect.left });
-									}
-									setShowModePicker(!showModePicker);
-								}}
-							>
-								<span className="text-[10px] tracking-[-2px]">&#8734;&#8734;</span>
-								<span className="max-w-[120px] overflow-hidden text-ellipsis">{chatMode}</span>
-								<ChevronDown className="h-3 w-3" />
-							</button>
-							{showModePicker && modePickerPos && (
-								<div
-									className="fixed z-[1000] min-w-[150px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-									style={{ top: modePickerPos.top, left: modePickerPos.left }}
+							{/* Mode picker */}
+							<div className="relative" ref={modePickerRef}>
+								<button
+									ref={modeButtonRef}
+									className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
+									onClick={() => {
+										if (!showModePicker && modeButtonRef.current) {
+											const rect =
+												modeButtonRef.current.getBoundingClientRect();
+											setModePickerPos({
+												top: rect.bottom + 4,
+												left: rect.left,
+											});
+										}
+										setShowModePicker(!showModePicker);
+									}}
 								>
-									{(["Agent", "Ask", "Edit"] as const).map((mode) => (
-										<button
-											key={mode}
-											className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${mode === chatMode ? "bg-highlight text-sky" : ""}`}
-											onClick={() => {
-												chatService.setMode(mode);
-												setChatMode(mode);
-												setShowModePicker(false);
-											}}
-										>
-											{mode}
-										</button>
-									))}
-								</div>
-							)}
-						</div>
-
-						{/* Model picker */}
-						<div className="relative" ref={modelPickerRef}>
-							<button
-								ref={modelButtonRef}
-								className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
-								onClick={() => {
-									if (!showModelPicker && modelButtonRef.current) {
-										const rect = modelButtonRef.current.getBoundingClientRect();
-										setModelPickerPos({ top: rect.bottom + 4, left: rect.left });
-									}
-									setShowModelPicker(!showModelPicker);
-								}}
-							>
-								{isLoadingModel && <Loader2 className="h-3 w-3 animate-spin" />}
-								<span className="max-w-[120px] overflow-hidden text-ellipsis">
-									{selectedModel?.displayName ?? "No model"}
-								</span>
-								<ChevronDown className="h-3 w-3" />
-							</button>
-							{showModelPicker && modelPickerPos && (
-								<div
-									className="fixed z-[1000] max-h-[300px] min-w-[220px] overflow-y-auto rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-									style={{ top: modelPickerPos.top, left: modelPickerPos.left }}
-								>
-									{installedModels.length > 0 ? (
-										installedModels.map((model) => (
-											<button
-												key={model.id}
-												className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
-												onClick={() => handleSelectModel(model)}
-											>
-												<span>{model.displayName}</span>
-											</button>
-										))
-									) : (
-										<div className="p-2 text-center text-xs text-placeholder">
-											No models installed
-										</div>
-									)}
-									<div className="my-1 h-px bg-border-500" />
-									<button
-										className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
-										onClick={handleFetchCatalog}
+									<span className="text-[10px] tracking-[-2px]">
+										&#8734;&#8734;
+									</span>
+									<span className="max-w-[120px] overflow-hidden text-ellipsis">
+										{chatMode}
+									</span>
+									<ChevronDown className="h-3 w-3" />
+								</button>
+								{showModePicker && modePickerPos && (
+									<div
+										className="fixed z-[1000] min-w-[150px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+										style={{ top: modePickerPos.top, left: modePickerPos.left }}
 									>
-										<Download className="mr-2 h-3.5 w-3.5" />
-										Add Local Model...
-									</button>
-								</div>
-							)}
-						</div>
+										{(["Agent", "Ask", "Edit"] as const).map((mode) => (
+											<button
+												key={mode}
+												className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${mode === chatMode ? "bg-highlight text-sky" : ""}`}
+												onClick={() => {
+													chatService.setMode(mode);
+													setChatMode(mode);
+													setShowModePicker(false);
+												}}
+											>
+												{mode}
+											</button>
+										))}
+									</div>
+								)}
+							</div>
+
+							{/* Model picker */}
+							<div className="relative" ref={modelPickerRef}>
+								<button
+									ref={modelButtonRef}
+									className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
+									onClick={() => {
+										if (!showModelPicker && modelButtonRef.current) {
+											const rect =
+												modelButtonRef.current.getBoundingClientRect();
+											setModelPickerPos({
+												top: rect.bottom + 4,
+												left: rect.left,
+											});
+										}
+										setShowModelPicker(!showModelPicker);
+									}}
+								>
+									{isLoadingModel && (
+										<Loader2 className="h-3 w-3 animate-spin" />
+									)}
+									<span className="max-w-[120px] overflow-hidden text-ellipsis">
+										{selectedModel?.displayName ?? "No model"}
+									</span>
+									<ChevronDown className="h-3 w-3" />
+								</button>
+								{showModelPicker && modelPickerPos && (
+									<div
+										className="fixed z-[1000] max-h-[300px] min-w-[220px] overflow-y-auto rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+										style={{
+											top: modelPickerPos.top,
+											left: modelPickerPos.left,
+										}}
+									>
+										{installedModels.length > 0 ? (
+											installedModels.map((model) => (
+												<button
+													key={model.id}
+													className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
+													onClick={() => handleSelectModel(model)}
+												>
+													<span>{model.displayName}</span>
+												</button>
+											))
+										) : (
+											<div className="p-2 text-center text-xs text-placeholder">
+												No models installed
+											</div>
+										)}
+										<div className="my-1 h-px bg-border-500" />
+										<button
+											className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
+											onClick={handleFetchCatalog}
+										>
+											<Download className="mr-2 h-3.5 w-3.5" />
+											Add Local Model...
+										</button>
+									</div>
+								)}
+							</div>
 						</div>
 
 						<div className="flex shrink-0 items-center gap-1">
@@ -450,7 +544,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 								aria-label={isStreaming ? "Stop generation" : "Voice input"}
 								title={isStreaming ? "Stop generation" : "Voice input"}
 							>
-								{isStreaming ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-4 w-4" />}
+								{isStreaming ? (
+									<Square className="h-4 w-4 fill-current" />
+								) : (
+									<Mic className="h-4 w-4" />
+								)}
 							</button>
 						</div>
 					</div>
@@ -505,7 +603,9 @@ export function ChatPanel({ className }: ChatPanelProps) {
 								{serverStatus === "starting" && (
 									<>
 										<Loader2 className="h-5 w-5 animate-spin text-foreground/40" />
-										<span className="text-foreground/40">Starting server...</span>
+										<span className="text-foreground/40">
+											Starting server...
+										</span>
 									</>
 								)}
 								{serverStatus === "error" && (
@@ -519,17 +619,24 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					</div>
 				) : (
 					<div className="mx-auto flex max-w-[950px] flex-col">
-						{messages.map((msg, idx) => {
-							if (msg.subtype === "tool_result") {
-								const prev = messages[idx - 1];
-								if (prev?.subtype === "tool_use" && prev.toolInvocation?.toolCallId === msg.toolResult?.toolCallId) {
-									return null;
-								}
+						{messages.map((msg) => {
+							if (
+								msg.subtype === "tool_result" &&
+								toolMessagePairing.pairedResultIds.has(msg.id)
+							) {
+								return null;
 							}
 							if (msg.subtype === "tool_use") {
-								const next = messages[idx + 1];
-								if (next?.subtype === "tool_result" && next.toolResult?.toolCallId === msg.toolInvocation?.toolCallId) {
-									return <ChatMessageItem key={msg.id} message={msg} pairedResult={next} />;
+								const pairedResult =
+									toolMessagePairing.pairedResultByToolUseId.get(msg.id);
+								if (pairedResult) {
+									return (
+										<ChatMessageItem
+											key={msg.id}
+											message={msg}
+											pairedResult={pairedResult}
+										/>
+									);
 								}
 							}
 							return <ChatMessageItem key={msg.id} message={msg} />;
@@ -587,7 +694,9 @@ export function ChatPanel({ className }: ChatPanelProps) {
 									<span className="flex items-center gap-1.5 text-[13px] text-foreground">
 										{entry.name}
 										{entry.recommended && (
-											<span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">Recommended</span>
+											<span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">
+												Recommended
+											</span>
 										)}
 									</span>
 									<span className="text-[11px] text-placeholder">
@@ -639,7 +748,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 												? "cancelled"
 												: "active"
 								}
-								onCancel={event.canCancel ? () => handleCancelDownload(event.modelId) : undefined}
+								onCancel={
+									event.canCancel
+										? () => handleCancelDownload(event.modelId)
+										: undefined
+								}
 							/>
 						))}
 					</div>
@@ -657,13 +770,22 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 }
 
-function ChatMessageItem({ message, pairedResult }: { message: ChatMessage; pairedResult?: ChatMessage }) {
+function ChatMessageItem({
+	message,
+	pairedResult,
+}: { message: ChatMessage; pairedResult?: ChatMessage }) {
 	const isUser = message.role === "user";
-	const isNotice = message.role === "system" || message.subtype === "error" || message.subtype === "interruption";
-	const isToolMessage = message.subtype === "tool_use" || message.subtype === "tool_result";
+	const isNotice =
+		message.role === "system" ||
+		message.subtype === "error" ||
+		message.subtype === "interruption";
+	const isToolMessage =
+		message.subtype === "tool_use" || message.subtype === "tool_result";
 
 	return (
-		<div className={`flex cursor-default select-text flex-col px-4 py-1.5 ${isUser ? "items-end" : ""}`}>
+		<div
+			className={`flex cursor-default select-text flex-col px-4 py-1.5 ${isUser ? "items-end" : ""}`}
+		>
 			{!isUser && !isToolMessage && (
 				<div className="mb-1 flex items-center gap-2">
 					<div className="flex size-6 items-center justify-center rounded-full bg-border-500">
@@ -671,7 +793,9 @@ function ChatMessageItem({ message, pairedResult }: { message: ChatMessage; pair
 					</div>
 				</div>
 			)}
-			<div className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "" : ""}`}>
+			<div
+				className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "" : ""}`}
+			>
 				{isToolMessage ? (
 					<ToolMessageRenderer message={message} pairedResult={pairedResult} />
 				) : message.isStreaming && !message.content ? (
@@ -681,14 +805,20 @@ function ChatMessageItem({ message, pairedResult }: { message: ChatMessage; pair
 						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite_0.4s] rounded-full bg-placeholder" />
 					</div>
 				) : (
-					<div className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`}>
+					<div
+						className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`}
+					>
 						{message.content.split("\n").map((line, i) => (
 							<React.Fragment key={i}>
 								{i > 0 && <br />}
 								{line}
 							</React.Fragment>
 						))}
-						{message.isStreaming && <span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">|</span>}
+						{message.isStreaming && (
+							<span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">
+								|
+							</span>
+						)}
 					</div>
 				)}
 			</div>

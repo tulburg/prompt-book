@@ -13,6 +13,7 @@ import type {
 } from "@/lib/project-files";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/lower/Button";
+import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
 import {
   FileCode2,
   FolderOpen,
@@ -96,7 +97,11 @@ export function PromptEditor({
           ) : null}
         </div>
         {openFiles.length > 0 ? (
-          <div className="tab-scrollbar flex items-center overflow-x-auto bg-panel-700 border-b border-border-500">
+          <TinyScrollArea
+            direction="horizontal"
+            className="border-b border-border-500 bg-panel-700"
+            contentClassName="flex items-center"
+          >
             {openFiles.map((file) => {
               const isActive = activeFilePath === file.path;
               const isPreview = previewFilePath === file.path;
@@ -162,7 +167,7 @@ export function PromptEditor({
                 </div>
               );
             })}
-          </div>
+          </TinyScrollArea>
         ) : null}
 
         <div className="min-h-0 min-w-0 flex-1">

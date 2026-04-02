@@ -8,6 +8,10 @@ import { cn } from "@/lib/utils";
 import type { ActiveFileState } from "@/lib/project-files";
 import type * as Monaco from "monaco-editor";
 
+function getCanvasLineNumbersMinChars() {
+	return 4;
+}
+
 interface MonacoEditorProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
 	activeFile: ActiveFileState;
 	onChange: (content: string) => void;
@@ -101,7 +105,7 @@ export function MonacoEditor({
 				fontFamily:
 					'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
 				fontSize: 13,
-				lineNumbersMinChars: 3,
+				lineNumbersMinChars: getCanvasLineNumbersMinChars(),
 				minimap: { enabled: false },
 				padding: { bottom: 16, top: 16 },
 				readOnly: !activeFile.permissions.write,
@@ -266,7 +270,7 @@ export function MonacoEditor({
 	return (
 		<div
 			ref={containerRef}
-			className={cn("h-full min-w-0 w-full", className)}
+			className={cn("monaco-canvas-editor h-full min-w-0 w-full", className)}
 			{...props}
 		/>
 	);

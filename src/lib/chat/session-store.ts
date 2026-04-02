@@ -66,6 +66,20 @@ export class ChatSessionStore {
 	private activeSessionId: string | null = null;
 	private defaultMode: ChatMode = "Agent";
 
+	private findNearestOpenSession(startIndex: number): ChatSessionState | null {
+		for (let index = startIndex; index < this.sessions.length; index++) {
+			if (this.sessions[index]?.closedAt == null) {
+				return this.sessions[index] ?? null;
+			}
+		}
+		for (let index = startIndex - 1; index >= 0; index--) {
+			if (this.sessions[index]?.closedAt == null) {
+				return this.sessions[index] ?? null;
+			}
+		}
+		return null;
+	}
+
 	constructor() {
 		this.restore();
 	}
@@ -103,6 +117,8 @@ export class ChatSessionStore {
 			this.sessions = Array.isArray(parsed.sessions)
 				? parsed.sessions.map((session) => ({
 						...session,
+						closedAt:
+							typeof session.closedAt === "number" ? session.closedAt : null,
 						todos: Array.isArray(session.todos) ? session.todos : [],
 						transcript: Array.isArray(session.transcript) ? session.transcript : [],
 					}))
@@ -126,8 +142,23 @@ export class ChatSessionStore {
 		return this.sessions.map(toSnapshot);
 	}
 
+	getOpenSnapshots(): ChatSession[] {
+		return this.sessions
+			.filter((session) => session.closedAt == null)
+			.map(toSnapshot);
+	}
+
+	getClosedSnapshots(): ChatSession[] {
+		return this.sessions
+			.filter((session) => session.closedAt != null)
+			.map(toSnapshot);
+	}
+
 	getActiveSnapshot(): ChatSession | null {
-		const session = this.sessions.find((candidate) => candidate.id === this.activeSessionId);
+		const session = this.sessions.find(
+			(candidate) =>
+				candidate.id === this.activeSessionId && candidate.closedAt == null,
+		);
 		return session ? toSnapshot(session) : null;
 	}
 
@@ -158,6 +189,7 @@ export class ChatSessionStore {
 			modelId,
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			closedAt: null,
 			todos: [],
 			transcript: [createBootstrapEntry(mode)],
 		};
@@ -167,8 +199,27 @@ export class ChatSessionStore {
 		return toSnapshot(session);
 	}
 
+	closeSession(sessionId: string): ChatSession | null {
+		const index = this.sessions.findIndex((candidate) => candidate.id === sessionId);
+		if (index === -1) return this.getActiveSnapshot();
+
+		const session = this.sessions[index];
+		if (!session || session.closedAt != null) {
+			return this.getActiveSnapshot();
+		}
+		session.closedAt = Date.now();
+		if (this.activeSessionId === sessionId) {
+			const fallback = this.findNearestOpenSession(index);
+			this.activeSessionId = fallback?.id ?? null;
+		}
+		this.persist();
+		return this.getActiveSnapshot();
+	}
+
 	setActiveSession(sessionId: string): ChatSession | null {
-		const exists = this.sessions.some((session) => session.id === sessionId);
+		const exists = this.sessions.some(
+			(session) => session.id === sessionId && session.closedAt == null,
+		);
 		if (!exists) return null;
 		this.activeSessionId = sessionId;
 		this.persist();

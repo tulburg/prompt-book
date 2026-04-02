@@ -39,13 +39,18 @@ describe("chat service", () => {
 			messages: Array<{ role: string; content: string }>;
 		};
 		const userTurns = body.messages.filter(
-			(message) => message.role === "user" && message.content.includes("Hello there"),
+			(message) =>
+				message.role === "user" && message.content.includes("Hello there"),
 		);
-		const systemMessages = body.messages.filter((message) => message.role === "system");
+		const systemMessages = body.messages.filter(
+			(message) => message.role === "system",
+		);
 
 		expect(userTurns).toHaveLength(1);
 		expect(systemMessages.length).toBeGreaterThan(0);
-		expect(systemMessages.some((message) => message.content.includes("# Mode: Ask"))).toBe(true);
+		expect(
+			systemMessages.some((message) => message.content.includes("# Mode: Ask")),
+		).toBe(true);
 		expect(service.activeSession?.messages.at(-1)?.content).toBe("Hello back");
 	});
 
@@ -88,13 +93,15 @@ describe("chat service", () => {
 	});
 
 	it("stops an active stream and marks the partial assistant turn as stopped", async () => {
-		const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-			return new Promise<Response>((_resolve, reject) => {
-				init?.signal?.addEventListener("abort", () => {
-					reject(new DOMException("Aborted", "AbortError"));
+		const fetchMock = vi
+			.fn()
+			.mockImplementation((_url: string, init?: RequestInit) => {
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						reject(new DOMException("Aborted", "AbortError"));
+					});
 				});
 			});
-		});
 		vi.stubGlobal("fetch", fetchMock);
 
 		const service = new ChatService();
@@ -112,10 +119,31 @@ describe("chat service", () => {
 		const lastMessage = messages.at(-1);
 		expect(lastMessage?.role).toBe("system");
 		expect(lastMessage?.content).toBe("[Request interrupted by user]");
-		expect(messages.some((message) => message.content === "*[Generation stopped]*")).toBe(false);
+		expect(
+			messages.some((message) => message.content === "*[Generation stopped]*"),
+		).toBe(false);
 
 		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(init.signal?.aborted).toBe(true);
+	});
+
+	it("closes a chat tab while retaining the session in history", () => {
+		const service = new ChatService();
+		const first = service.createSession("First");
+		const second = service.createSession("Second");
+		const third = service.createSession("Third");
+
+		service.setActiveSession(second.id);
+		service.closeSession(second.id);
+
+		expect(service.sessions.map((session) => session.id)).toEqual([
+			first.id,
+			third.id,
+		]);
+		expect(service.historySessions.map((session) => session.id)).toEqual([
+			second.id,
+		]);
+		expect(service.activeSession?.id).toBe(third.id);
 	});
 
 	it("keeps repeated punctuation instead of synthesizing a detector stop message", async () => {
@@ -159,7 +187,8 @@ describe("chat service", () => {
 		expect(
 			messages.some(
 				(message) =>
-					message.content === "*[Model produced repeated output — response stopped automatically]*",
+					message.content ===
+					"*[Model produced repeated output — response stopped automatically]*",
 			),
 		).toBe(false);
 	});
@@ -217,8 +246,84 @@ describe("chat service", () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		const messages = service.activeSession?.messages ?? [];
-		expect(messages.some((message) => message.subtype === "tool_use")).toBe(true);
-		expect(messages.some((message) => message.subtype === "tool_result")).toBe(true);
+		expect(messages.some((message) => message.subtype === "tool_use")).toBe(
+			true,
+		);
+		expect(messages.some((message) => message.subtype === "tool_result")).toBe(
+			true,
+		);
 		expect(messages.at(-1)?.content).toBe("Finished after tool.");
+	});
+
+	it("strips echoed tool invocation text from assistant messages", async () => {
+		const toolInput = {
+			command:
+				'find /Users/tulburg/Developer/stream-x -name "package.json" -o -name "requirements.txt"',
+			description: "Find backend and root package files",
+		};
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: `Bash(${JSON.stringify(toolInput)})\n\n${toolInput.description}\n${toolInput.command}`,
+									tool_calls: [
+										{
+											id: "call_1",
+											function: {
+												name: "Bash",
+												arguments: JSON.stringify(toolInput),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "Done searching." } }],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "openai/gpt-oss-20b",
+			displayName: "GPT OSS 20B",
+		};
+		service.createSession();
+
+		await service.sendMessage("Search the repo");
+
+		const messages = service.activeSession?.messages ?? [];
+		expect(
+			messages.some(
+				(message) =>
+					message.subtype === "message" && message.content.includes("Bash("),
+			),
+		).toBe(false);
+		expect(messages.some((message) => message.subtype === "tool_use")).toBe(
+			true,
+		);
+		expect(messages.some((message) => message.subtype === "tool_result")).toBe(
+			true,
+		);
+		expect(messages.at(-1)?.content).toBe("Done searching.");
 	});
 });

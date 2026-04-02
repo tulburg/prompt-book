@@ -7,6 +7,10 @@ const DANGEROUS_PATHS = [
 	"/dev/tty", "/dev/stdin", "/dev/stdout", "/dev/stderr",
 ];
 
+function isAbsolutePathLike(filePath: string): boolean {
+	return filePath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(filePath);
+}
+
 export const readTool: ChatToolDefinition = {
 	name: "Read",
 	source: "claude",
@@ -55,6 +59,10 @@ export const readTool: ChatToolDefinition = {
 
 		if (DANGEROUS_PATHS.some((p) => filePath.startsWith(p))) {
 			return errorResult(`Cannot read device path: ${filePath}`);
+		}
+
+		if (!isAbsolutePathLike(filePath)) {
+			return errorResult(`file_path must be an absolute path: ${filePath}`);
 		}
 
 		const offset = input.offset === undefined ? undefined : coerceNumber(input.offset, 1);

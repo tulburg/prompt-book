@@ -1,4 +1,8 @@
 import * as React from "react";
+import {
+  MonacoCodeView,
+  MonacoDiffView,
+} from "@/components/editor/MonacoReadOnlyViews";
 import { FileIcon } from "@/components/FileIcon";
 import type { ChatMessage } from "@/lib/chat/types";
 import type {
@@ -8,24 +12,29 @@ import type {
   DiffHunk,
   JsonObject,
 } from "@/lib/chat/tools/tool-types";
-import { ScanSearch, Search, SquareTerminal } from "lucide-react";
+import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
+import { Search, SquareTerminal } from "lucide-react";
 
 /* ── Primitives ── */
 
 function CodeBlock({
   children,
   maxHeight,
+  filePath,
+  language,
 }: {
   children: string;
-  maxHeight?: string;
+  maxHeight?: number;
+  filePath?: string;
+  language?: string;
 }) {
   return (
-    <pre
-      className="overflow-x-auto py-2 text-[11.5px] leading-relaxed text-foreground font-mono"
-      style={maxHeight ? { maxHeight, overflow: "auto" } : undefined}
-    >
-      <code>{children}</code>
-    </pre>
+    <MonacoCodeView
+      value={children}
+      filePath={filePath}
+      language={language}
+      maxHeight={maxHeight}
+    />
   );
 }
 
@@ -65,30 +74,6 @@ function ChevronIcon({
         fill="none"
       />
     </svg>
-  );
-}
-
-function CollapsibleSection({
-  label,
-  defaultOpen = false,
-  children,
-}: {
-  label: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = React.useState(defaultOpen);
-  return (
-    <div>
-      <button
-        className="flex w-full cursor-pointer items-center gap-1.5 bg-transparent border-none px-0 py-1 text-[10px] uppercase tracking-wide text-placeholder hover:text-foreground"
-        onClick={() => setOpen(!open)}
-      >
-        <ChevronIcon expanded={open} />
-        {label}
-      </button>
-      {open && <div className="mt-1">{children}</div>}
-    </div>
   );
 }
 
@@ -171,6 +156,30 @@ function getIOCardFileName(
     extractFileNameFromPathLike(display.title) ??
     extractFileNameFromPathLike(display.subtitle)
   );
+}
+
+function getIOCardFilePath(
+  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
+): string | undefined {
+  try {
+    const parsed = JSON.parse(display.input) as Record<string, unknown>;
+    const pathValue =
+      (typeof parsed.file_path === "string" && parsed.file_path) ||
+      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
+      undefined;
+    if (pathValue) {
+      return pathValue;
+    }
+  } catch {
+    // Ignore non-JSON tool inputs and fall back to display metadata.
+  }
+
+  const titlePath =
+    typeof display.title === "string" ? display.title : undefined;
+  if (titlePath?.includes("/") || titlePath?.includes("\\")) {
+    return titlePath;
+  }
+  return undefined;
 }
 
 /* ── Card wrapper (Codally-style bordered tool card) ── */
@@ -265,7 +274,7 @@ function TerminalCard({
 
       {expanded && (
         <div className="border-t border-border-500 bg-panel-500">
-          <div className="px-2.5 py-2 bg-panel-600/50">
+          <div className="px-2.5 py-2 bg-panel-700">
             <div className="font-mono text-[11px] leading-relaxed text-foreground/80">
               <span className="text-placeholder select-none">$ </span>
               {command}
@@ -273,21 +282,16 @@ function TerminalCard({
           </div>
 
           {hasOutput && (
-            <div
-              className="border-t border-border-500 px-2.5 py-2"
-              style={{ maxHeight: "300px", overflow: "auto" }}
+            <TinyScrollArea
+              className="border-t border-border-500"
+              style={{ maxHeight: 300 }}
             >
               {display?.stdout && (
-                <pre className="overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-foreground/70">
+                <CodeBlock maxHeight={220} language="shell">
                   {display.stdout}
-                </pre>
+                </CodeBlock>
               )}
-              {display?.stderr && (
-                <pre className="mt-1 overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-red-400/80">
-                  {display.stderr}
-                </pre>
-              )}
-            </div>
+            </TinyScrollArea>
           )}
 
           {!hasOutput && isComplete && (
@@ -331,6 +335,11 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
 function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
   const [expanded, setExpanded] = React.useState(false);
   const hasHunks = display.hunks.length > 0;
+  const hasMonacoDiff =
+    display.action === "created"
+      ? Boolean(display.modifiedContent)
+      : display.originalContent !== undefined &&
+        display.modifiedContent !== undefined;
   const fileName = display.filePath.split("/").pop() || display.filePath;
   const dirPath = shortenPath(
     display.filePath.split("/").slice(0, -1).join("/"),
@@ -342,15 +351,10 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
         onClick={() => hasHunks && setExpanded(!expanded)}
         clickable={hasHunks}
       >
-        <span className="text-[12px]">📄</span>
+        <FileIcon fileName={fileName} />
         <span className="min-w-0 truncate text-[12px] text-foreground">
           {fileName}
         </span>
-        {dirPath && (
-          <span className="text-[10px] text-placeholder truncate">
-            {dirPath}
-          </span>
-        )}
         <span className="ml-auto flex gap-1.5 text-[11px] font-medium tabular-nums">
           {display.additions > 0 && (
             <span className="text-green-400">+{display.additions}</span>
@@ -361,19 +365,41 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
         </span>
         {hasHunks && <ChevronIcon expanded={expanded} />}
       </ToolCardHeader>
-      {expanded && hasHunks && (
-        <div
-          className="overflow-x-auto border-t border-border-500 divide-y divide-border-500"
-          style={{ maxHeight: "400px", overflow: "auto" }}
-        >
-          {display.hunks.map((hunk, i) => (
-            <DiffHunkView key={`hunk-${i}`} hunk={hunk} />
-          ))}
-        </div>
-      )}
+      {expanded &&
+        hasHunks &&
+        (hasMonacoDiff ? (
+          <div className="border-t border-border-500">
+            <MonacoDiffView
+              originalValue={display.originalContent ?? ""}
+              modifiedValue={display.modifiedContent ?? ""}
+              filePath={display.filePath}
+              maxHeight={400}
+            />
+          </div>
+        ) : (
+          <TinyScrollArea
+            className="border-t border-border-500"
+            contentClassName="divide-y divide-border-500"
+            style={{ maxHeight: 400 }}
+          >
+            {display.hunks.map((hunk, i) => (
+              <DiffHunkView key={`hunk-${i}`} hunk={hunk} />
+            ))}
+          </TinyScrollArea>
+        ))}
       {!hasHunks && display.action === "created" && (
-        <div className="border-t border-border-500 px-2.5 py-1 text-[11px] text-placeholder">
-          New file created
+        <div className="border-t border-border-500">
+          {display.modifiedContent ? (
+            <MonacoCodeView
+              value={display.modifiedContent}
+              filePath={display.filePath}
+              maxHeight={320}
+            />
+          ) : (
+            <div className="px-2.5 py-1 text-[11px] text-placeholder">
+              New file created
+            </div>
+          )}
         </div>
       )}
     </ToolCard>
@@ -384,15 +410,14 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
 
 function IOCard({
   display,
-  toolName,
 }: {
   display: Extract<ChatToolDisplay, { kind: "input_output" }>;
-  toolName: string;
 }) {
   const [expanded, setExpanded] = React.useState(display.isError === true);
   // const title = display.title || toolName;
   const hasOutput = Boolean(display.output);
   const fileName = getIOCardFileName(display);
+  const filePath = getIOCardFilePath(display);
 
   return (
     <ToolCard>
@@ -405,9 +430,11 @@ function IOCard({
         <ChevronIcon expanded={expanded} className="ml-auto" />
       </ToolCardHeader>
       {expanded && (
-        <div className="border-t border-border-500 px-2.5 py-2 space-y-2">
+        <div className="border-t border-border-500">
           {hasOutput && (
-            <CodeBlock maxHeight="300px">{display.output!}</CodeBlock>
+            <CodeBlock maxHeight={300} filePath={filePath}>
+              {display.output!}
+            </CodeBlock>
           )}
         </div>
       )}
@@ -432,7 +459,6 @@ function ListCard({
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const items = normalizeFileListItems(display.items);
-  const count = items.length;
   const title = display.title || toolName;
 
   return (
@@ -446,7 +472,10 @@ function ListCard({
         <ChevronIcon expanded={expanded} className="ml-auto" />
       </ToolCardHeader>
       {expanded && (
-        <div className="border-t border-border-500 max-h-[300px] overflow-y-auto">
+        <TinyScrollArea
+          className="border-t border-border-500"
+          style={{ maxHeight: 300 }}
+        >
           <div className="divide-y divide-border-500/50">
             {items.map((item) => (
               <div key={item.value} className="px-2.5 py-1.5 text-[11.5px]">
@@ -466,7 +495,7 @@ function ListCard({
               Results truncated
             </div>
           )}
-        </div>
+        </TinyScrollArea>
       )}
     </ToolCard>
   );
@@ -573,7 +602,7 @@ export function ToolMessageRenderer({
             </span>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight="300px">{result.outputText}</CodeBlock>
+            <CodeBlock maxHeight={300}>{result.outputText}</CodeBlock>
           </div>
         </ToolCard>
       );
@@ -598,7 +627,7 @@ export function ToolMessageRenderer({
             </span>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight="300px">{outputText}</CodeBlock>
+            <CodeBlock maxHeight={300}>{outputText}</CodeBlock>
           </div>
         </ToolCard>
       );
@@ -628,7 +657,7 @@ function ToolDisplayCard({
     case "diff":
       return <DiffCard display={display} />;
     case "input_output":
-      return <IOCard display={display} toolName={toolName} />;
+      return <IOCard display={display} />;
     case "file_list":
       return <ListCard display={display} toolName={toolName} />;
     case "todo_list":
@@ -643,7 +672,7 @@ function ToolDisplayCard({
             </span>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight="300px">
+            <CodeBlock maxHeight={300} language="json">
               {JSON.stringify(display.value, null, 2)}
             </CodeBlock>
           </div>

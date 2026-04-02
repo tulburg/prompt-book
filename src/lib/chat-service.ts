@@ -1,7 +1,7 @@
-import { buildQueryContext } from "./chat/query-context";
-import { createTranscriptEntry, ChatSessionStore } from "./chat/session-store";
-import { buildAnthropicRequest } from "./chat/request-builder";
 import { resolveChatModelProfile } from "./chat/model-profiles";
+import { buildQueryContext } from "./chat/query-context";
+import { buildAnthropicRequest } from "./chat/request-builder";
+import { ChatSessionStore, createTranscriptEntry } from "./chat/session-store";
 import { executeToolCalls } from "./chat/tools/tool-orchestration";
 import { createToolContext } from "./chat/tools/tool-runtime";
 import type { JsonObject } from "./chat/tools/tool-types";
@@ -13,9 +13,75 @@ import type {
 	ChatTranscriptEntry,
 	ChatUiEvent,
 } from "./chat/types";
-import { llamaServerService, type LlamaInstalledModelInfo } from "./server-service";
+import {
+	type LlamaInstalledModelInfo,
+	llamaServerService,
+} from "./server-service";
 
 type Listener<T> = (value: T) => void;
+
+function sanitizeAssistantToolEchoes(
+	content: string,
+	toolCalls: Array<{ name: string; input: JsonObject }>,
+): string {
+	if (!content.trim() || toolCalls.length === 0) {
+		return content.trim();
+	}
+
+	let lines = content.split("\n");
+	for (const toolCall of toolCalls) {
+		lines = stripToolInvocationEcho(lines, toolCall);
+	}
+
+	return lines
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+function stripToolInvocationEcho(
+	lines: string[],
+	toolCall: { name: string; input: JsonObject },
+): string[] {
+	const invocationLine = `${toolCall.name}(${JSON.stringify(toolCall.input)})`;
+	const description = getToolEchoField(toolCall.input, "description");
+	const command = getToolEchoField(toolCall.input, "command");
+	const nextLines: string[] = [];
+
+	for (let index = 0; index < lines.length; index++) {
+		if (lines[index]?.trim() !== invocationLine) {
+			nextLines.push(lines[index] ?? "");
+			continue;
+		}
+
+		let cursor = skipBlankLines(lines, index + 1);
+		if (description && lines[cursor]?.trim() === description) {
+			cursor = skipBlankLines(lines, cursor + 1);
+		}
+		if (command && lines[cursor]?.trim() === command) {
+			cursor = skipBlankLines(lines, cursor + 1);
+		}
+
+		index = cursor - 1;
+	}
+
+	return nextLines;
+}
+
+function skipBlankLines(lines: string[], startIndex: number): number {
+	let index = startIndex;
+	while (index < lines.length && lines[index]?.trim() === "") {
+		index += 1;
+	}
+	return index;
+}
+
+function getToolEchoField(input: JsonObject, key: string): string | null {
+	const value = input[key];
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: null;
+}
 
 class SimpleEmitter<T> {
 	private listeners = new Set<Listener<T>>();
@@ -34,10 +100,14 @@ class SimpleEmitter<T> {
 
 export class ChatService {
 	private readonly _onDidUpdateSession = new SimpleEmitter<ChatSession>();
-	readonly onDidUpdateSession = this._onDidUpdateSession.on.bind(this._onDidUpdateSession);
+	readonly onDidUpdateSession = this._onDidUpdateSession.on.bind(
+		this._onDidUpdateSession,
+	);
 
 	private readonly _onDidStreamEvent = new SimpleEmitter<ChatUiEvent>();
-	readonly onDidStreamEvent = this._onDidStreamEvent.on.bind(this._onDidStreamEvent);
+	readonly onDidStreamEvent = this._onDidStreamEvent.on.bind(
+		this._onDidStreamEvent,
+	);
 
 	private readonly store = new ChatSessionStore();
 	private readonly transport = new LlamaChatAdapter();
@@ -56,7 +126,11 @@ export class ChatService {
 	}> = [];
 
 	get sessions(): ChatSession[] {
-		return this.store.getSnapshots();
+		return this.store.getOpenSnapshots();
+	}
+
+	get historySessions(): ChatSession[] {
+		return this.store.getClosedSnapshots();
 	}
 
 	get activeSession(): ChatSession | null {
@@ -82,7 +156,10 @@ export class ChatService {
 	}
 
 	createSession(title = "New Chat"): ChatSession {
-		const session = this.store.createSession(title, this._currentModel?.id ?? null);
+		const session = this.store.createSession(
+			title,
+			this._currentModel?.id ?? null,
+		);
 		this._onDidUpdateSession.fire(session);
 		return session;
 	}
@@ -98,6 +175,16 @@ export class ChatService {
 		if (session) {
 			this._onDidUpdateSession.fire(session);
 		}
+	}
+
+	closeSession(sessionId: string): void {
+		if (this._streamingSessionId === sessionId) {
+			this.stopGeneration();
+		}
+		const session =
+			this.store.closeSession(sessionId) ??
+			this.store.createSession("New Chat", this._currentModel?.id ?? null);
+		this._onDidUpdateSession.fire(session);
 	}
 
 	setMode(mode: ChatMode): void {
@@ -141,7 +228,8 @@ export class ChatService {
 			session = this.store.setSessionMode(session.id, options.mode) ?? session;
 		}
 
-		const resolvedModel = this._currentModel?.id ?? session.modelId ?? "default";
+		const resolvedModel =
+			this._currentModel?.id ?? session.modelId ?? "default";
 		console.log("[ChatService] sendMessage:", {
 			content: content.slice(0, 80),
 			currentModelId: this._currentModel?.id ?? null,
@@ -189,7 +277,8 @@ export class ChatService {
 								stopGeneration: () => this.stopGeneration(),
 								setMode: (mode) => this.setMode(mode),
 								getTodos: () => this.store.getSessionTodos(session.id),
-								setTodos: (items, merge) => this.updateSessionTodos(session.id, items, merge),
+								setTodos: (items, merge) =>
+									this.updateSessionTodos(session.id, items, merge),
 							})
 						: undefined;
 				const queryContext = buildQueryContext({ session });
@@ -217,12 +306,16 @@ export class ChatService {
 					});
 				}
 
-				if (assistantContent) {
+				const sanitizedAssistantContent = sanitizeAssistantToolEchoes(
+					assistantContent,
+					assistantToolCalls,
+				);
+				if (sanitizedAssistantContent) {
 					this.commitEntry(
 						session.id,
 						createTranscriptEntry({
 							role: "assistant",
-							content: assistantContent,
+							content: sanitizedAssistantContent,
 							visibility: "visible",
 							includeInHistory: true,
 							subtype: "message",
@@ -234,10 +327,15 @@ export class ChatService {
 					break;
 				}
 				if (!toolContext) {
-					throw new Error("Received tool calls for a model without native tool support.");
+					throw new Error(
+						"Received tool calls for a model without native tool support.",
+					);
 				}
 
-				const executed = await executeToolCalls(assistantToolCalls, toolContext);
+				const executed = await executeToolCalls(
+					assistantToolCalls,
+					toolContext,
+				);
 				for (const item of executed) {
 					this.commitEntry(
 						session.id,
@@ -340,7 +438,9 @@ export class ChatService {
 		this._abortController = null;
 	}
 
-	async getInstalledModels(serverUrl?: string): Promise<LlamaInstalledModelInfo[]> {
+	async getInstalledModels(
+		serverUrl?: string,
+	): Promise<LlamaInstalledModelInfo[]> {
 		try {
 			return await llamaServerService.listInstalledModels(serverUrl);
 		} catch {
@@ -348,7 +448,10 @@ export class ChatService {
 		}
 	}
 
-	private commitEntry(sessionId: string, entry: ChatTranscriptEntry): ChatSession | null {
+	private commitEntry(
+		sessionId: string,
+		entry: ChatTranscriptEntry,
+	): ChatSession | null {
 		this._onDidStreamEvent.fire({
 			type: "message",
 			sessionId,

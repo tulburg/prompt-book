@@ -31,6 +31,86 @@ function execFileAsync(
 	});
 }
 
+function execRipgrepFilesStreaming(
+	args: string[],
+	options?: { cwd?: string; maxLines?: number },
+): Promise<string[]> {
+	return new Promise((resolve, reject) => {
+		const child = spawn("rg", args, {
+			cwd: options?.cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdoutBuffer = "";
+		let stderr = "";
+		const lines: string[] = [];
+		const maxLines = options?.maxLines ?? Number.POSITIVE_INFINITY;
+		let stoppedEarly = false;
+
+		const pushChunkLines = (chunk: string) => {
+			stdoutBuffer += chunk;
+			while (true) {
+				const newlineIndex = stdoutBuffer.indexOf("\n");
+				if (newlineIndex < 0) break;
+				const line = stdoutBuffer.slice(0, newlineIndex).trim();
+				stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+				if (!line) continue;
+				lines.push(line);
+				if (lines.length >= maxLines) {
+					stoppedEarly = true;
+					child.kill();
+					return;
+				}
+			}
+		};
+
+		child.stdout?.setEncoding("utf8");
+		child.stdout?.on("data", (chunk: string) => {
+			if (!stoppedEarly) {
+				pushChunkLines(chunk);
+			}
+		});
+
+		child.stderr?.setEncoding("utf8");
+		child.stderr?.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+
+		child.on("error", (error) => {
+			reject(error);
+		});
+
+		child.on("close", (code, signal) => {
+			if (stdoutBuffer && !stoppedEarly) {
+				const trailing = stdoutBuffer.trim();
+				if (trailing) {
+					lines.push(trailing);
+				}
+			}
+			if (stoppedEarly || signal === "SIGTERM") {
+				resolve(lines);
+				return;
+			}
+			if (code === 0) {
+				resolve(lines);
+				return;
+			}
+			if (code === 1) {
+				resolve([]);
+				return;
+			}
+			if ((code as number | null) === null) {
+				reject(new Error(stderr || "ripgrep terminated unexpectedly."));
+				return;
+			}
+			const error = Object.assign(new Error(stderr || `ripgrep exited with code ${code}`), {
+				code,
+				stderr,
+			});
+			reject(error);
+		});
+	});
+}
+
 function parseLines(output: string): string[] {
 	return output
 		.split(/\r?\n/)
@@ -38,21 +118,24 @@ function parseLines(output: string): string[] {
 		.filter(Boolean);
 }
 
-function isWithinRoots(targetPath: string, workspaceRoots: string[]): boolean {
-	if (workspaceRoots.length === 0) return true;
-	const absoluteTarget = path.resolve(targetPath);
-	return workspaceRoots.some((root) => {
-		const absoluteRoot = path.resolve(root);
-		return absoluteTarget === absoluteRoot || absoluteTarget.startsWith(`${absoluteRoot}${path.sep}`);
-	});
+function normalizeGlobPattern(pattern: string): string {
+	const trimmed = pattern.trim();
+	if (!trimmed) {
+		return trimmed;
+	}
+	const isNegated = trimmed.startsWith("!");
+	const rawPattern = isNegated ? trimmed.slice(1) : trimmed;
+	const normalized = rawPattern.startsWith("**/") ? rawPattern : `**/${rawPattern.replace(/^\/+/, "")}`;
+	return isNegated ? `!${normalized}` : normalized;
 }
 
-function resolveWorkspacePath(requestedPath: string | undefined, workspaceRoots: string[]): string {
-	const candidate = path.resolve(requestedPath || workspaceRoots[0] || process.cwd());
-	if (!isWithinRoots(candidate, workspaceRoots)) {
-		throw new Error("Tool path must stay within the open workspace roots.");
-	}
-	return candidate;
+function resolveSearchPath(requestedPath: string | undefined, workspaceRoots: string[]): string {
+	return path.resolve(requestedPath || workspaceRoots[0] || process.cwd());
+}
+
+function isRipgrepNoMatchError(error: unknown): boolean {
+	const code = (error as { code?: unknown })?.code;
+	return code === 1 || code === "1" || /code 1|status 1/i.test(String(error));
 }
 
 function applyWindow<T>(
@@ -134,14 +217,38 @@ export function registerChatToolHandlers() {
 		workspaceRoots?: string[];
 	}) => {
 		const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
-		const root = resolveWorkspacePath(payload.root, workspaceRoots);
-		const { stdout } = await execFileAsync("rg", ["--files", root, "--glob", payload.pattern]);
-		const items = parseLines(stdout).map((filePath) => toAbsoluteResultPath(root, filePath));
-		const window = applyWindow(items, payload.headLimit, payload.offset, 200);
-		return {
-			items: window.items,
-			truncated: window.truncated,
-		};
+		const root = resolveSearchPath(payload.root, workspaceRoots);
+		const pattern = normalizeGlobPattern(payload.pattern);
+		try {
+			const effectiveLimit = payload.headLimit === 0 ? undefined : (payload.headLimit ?? 200);
+			const offset = Math.max(0, payload.offset ?? 0);
+			const maxLines = effectiveLimit === undefined ? undefined : offset + effectiveLimit + 1;
+			const matches = await execRipgrepFilesStreaming(
+				["--files", root, "--glob", pattern],
+				{ maxLines },
+			);
+			const items = matches.map((filePath) => toAbsoluteResultPath(root, filePath));
+			const window = applyWindow(items, payload.headLimit, payload.offset, 200);
+			return {
+				items: window.items,
+				truncated: window.truncated,
+			};
+		} catch (error) {
+			const stderr = typeof (error as { stderr?: string }).stderr === "string"
+				? (error as { stderr: string }).stderr
+				: "";
+			// ripgrep exits 1 when no files match the glob
+			if (isRipgrepNoMatchError(error)) {
+				return { items: [], truncated: false };
+			}
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error("ripgrep (rg) is not installed or not available on PATH.");
+			}
+			if (/permission denied/i.test(stderr)) {
+				throw new Error(`ripgrep could not access part of the search path: ${stderr}`);
+			}
+			throw new Error(stderr || String(error));
+		}
 	});
 
 	ipcMain.handle("chat-tools:grep", async (_event, payload: Record<string, unknown>) => {
@@ -194,7 +301,7 @@ export function registerChatToolHandlers() {
 		const workspaceRoots = Array.isArray(payload.workspaceRoots)
 			? payload.workspaceRoots.filter((value): value is string => typeof value === "string")
 			: [];
-		const searchPath = resolveWorkspacePath(
+		const searchPath = resolveSearchPath(
 			typeof payload.path === "string" ? payload.path : undefined,
 			workspaceRoots,
 		);
@@ -263,7 +370,7 @@ export function registerChatToolHandlers() {
 			const stdout = typeof (error as { stdout?: string }).stdout === "string" ? (error as { stdout: string }).stdout : "";
 			const stderr = typeof (error as { stderr?: string }).stderr === "string" ? (error as { stderr: string }).stderr : "";
 			// ripgrep exits 1 on no matches
-			if (/code 1|status 1/i.test(String(error))) {
+			if (isRipgrepNoMatchError(error)) {
 				return { mode: outputMode, output: stdout.trim(), files: [], truncated: false, counts: [] };
 			}
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {

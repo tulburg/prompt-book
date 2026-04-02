@@ -58,6 +58,8 @@ export const writeTool: ChatToolDefinition = {
 				hunks,
 				additions,
 				deletions,
+				originalContent: result.originalContent,
+				modifiedContent: content,
 			});
 		}
 
@@ -68,6 +70,7 @@ export const writeTool: ChatToolDefinition = {
 			hunks: [],
 			additions: lineCount,
 			deletions: 0,
+			modifiedContent: content,
 		});
 	},
 };

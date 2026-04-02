@@ -98,6 +98,8 @@ export const editTool: ChatToolDefinition = {
 				hunks,
 				additions,
 				deletions,
+				originalContent: result.originalContent,
+				modifiedContent: result.content,
 			});
 		}
 
@@ -108,6 +110,7 @@ export const editTool: ChatToolDefinition = {
 			hunks: [],
 			additions: result.content.split("\n").length,
 			deletions: 0,
+			modifiedContent: result.content,
 		});
 	},
 };

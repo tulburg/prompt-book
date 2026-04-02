@@ -56,6 +56,7 @@ describe("request builder", () => {
 			modelId: "local-model",
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			closedAt: null,
 			transcript: [
 				createTranscriptEntry({
 					role: "system",
@@ -122,6 +123,7 @@ describe("request builder", () => {
 			modelId: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			closedAt: null,
 			transcript: [
 				createTranscriptEntry({
 					role: "user",
@@ -163,6 +165,7 @@ describe("request builder", () => {
 			modelId: "openai/gpt-oss-20b",
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			closedAt: null,
 			transcript: [
 				createTranscriptEntry({
 					role: "user",
@@ -206,6 +209,7 @@ describe("request builder", () => {
 			modelId: "openai/gpt-oss-20b",
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			closedAt: null,
 			transcript: [
 				createTranscriptEntry({
 					role: "user",

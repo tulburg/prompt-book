@@ -185,7 +185,6 @@ export function createToolContext(options: {
 		const readSnapshots = new Map<string, ReadSnapshot>();
 
 		const readRawFile = async (path: string) => {
-			ensureWorkspacePath(path, workspaceRoots, "Tool file access");
 			const projectBridge = await ensureProjectBridge();
 			const result = await projectBridge.readFile(path);
 			return result.content;
@@ -460,7 +459,6 @@ export function createToolContext(options: {
 			stopGeneration: options.stopGeneration,
 			setMode: options.setMode,
 			async readFile(path, readOptions) {
-				ensureWorkspacePath(path, workspaceRoots, "Tool file access");
 				const rawContent = await readRawFile(path);
 				const detected = detectFileType(path, rawContent);
 				if (detected.unsupportedMessage) {

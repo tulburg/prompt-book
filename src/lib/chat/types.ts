@@ -67,6 +67,7 @@ export interface ChatSessionState {
 	modelId: string | null;
 	createdAt: number;
 	bootstrappedAt: number;
+	closedAt: number | null;
 	todos: Array<{
 		id: string;
 		content: string;

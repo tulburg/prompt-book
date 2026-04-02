@@ -118,6 +118,8 @@ export interface ChatToolDisplayDiff {
 	hunks: DiffHunk[];
 	additions: number;
 	deletions: number;
+	originalContent?: string;
+	modifiedContent?: string;
 }
 
 export type ChatToolDisplay =
