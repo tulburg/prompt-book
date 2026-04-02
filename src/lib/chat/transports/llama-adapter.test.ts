@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-	buildLMStudioChatCompletionRequest,
+	buildLlamaChatCompletionRequest,
 	filterModelTextContent,
-	toUserFacingLMStudioServerErrorMessage,
-} from "@/lib/chat/lm-studio-chat-codec";
+	toUserFacingLlamaServerErrorMessage,
+} from "@/lib/chat/llama-chat-codec";
 import { LlamaChatAdapter } from "@/lib/chat/transports/llama-adapter";
 import type { AnthropicRequest } from "@/lib/chat/types";
 
 describe("llama adapter", () => {
-	it("converts the internal request into an LM Studio payload", () => {
+	it("converts the internal request into a llama payload", () => {
 		const request: AnthropicRequest = {
 			model: "local-model",
 			system: ["base system", "# Mode: Edit"],
@@ -32,7 +32,7 @@ describe("llama adapter", () => {
 			},
 		};
 
-		expect(buildLMStudioChatCompletionRequest(request)).toEqual({
+		expect(buildLlamaChatCompletionRequest(request)).toEqual({
 			model: "local-model",
 			stream: true,
 			temperature: 0.7,
@@ -61,7 +61,7 @@ describe("llama adapter", () => {
 			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
 		};
 
-		const result = buildLMStudioChatCompletionRequest(request);
+		const result = buildLlamaChatCompletionRequest(request);
 		const systemContent = result.messages
 			.filter((m) => m.role === "system")
 			.map((m) => m.content)
@@ -81,19 +81,19 @@ describe("llama adapter", () => {
 			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
 		};
 
-		const result = buildLMStudioChatCompletionRequest(request);
+		const result = buildLlamaChatCompletionRequest(request);
 		expect(result.stop).toContain("<|im_end|>");
 		expect(result.temperature).toBe(0.7);
 	});
 
-	it("filters LM Studio control tokens from model text", () => {
+	it("filters local model control tokens from model text", () => {
 		expect(filterModelTextContent("Hello<|assistant|> world<|end|>")).toBe("Hello world");
 	});
 
-	it("maps LM Studio prompt template mismatches to a clearer user error", () => {
+	it("maps local model prompt template mismatches to a clearer user error", () => {
 		expect(
-			toUserFacingLMStudioServerErrorMessage(
-				"LM Studio chat completions request failed with status 400: error rendering prompt with jinja template",
+			toUserFacingLlamaServerErrorMessage(
+				"Llama server chat completions request failed with status 400: error rendering prompt with jinja template",
 			),
 		).toContain("could not format the conversation");
 	});

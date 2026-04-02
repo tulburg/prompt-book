@@ -14,12 +14,12 @@ import {
 import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-service";
 import type { PullProgressEvent } from "@/lib/model-downloads";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
-import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/server-service";
+import { llamaServerService, type LlamaInstalledModelInfo } from "@/lib/server-service";
 import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 import {
 	fetchModelCatalog,
-	LMS_MODEL_CATALOG_FALLBACK,
-	type LMSModelEntry,
+	LLAMA_MODEL_CATALOG_FALLBACK,
+	type LlamaModelEntry,
 } from "@/lib/model-catalog";
 import type { ChatMode } from "@/lib/chat/types";
 import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
@@ -34,14 +34,14 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [activeSession, setActiveSession] = React.useState<ChatSession | null>(null);
 	const [inputValue, setInputValue] = React.useState("");
 	const [isStreaming, setIsStreaming] = React.useState(false);
-	const [installedModels, setInstalledModels] = React.useState<LMSInstalledModelInfo[]>([]);
-	const [selectedModel, setSelectedModel] = React.useState<LMSInstalledModelInfo | null>(null);
+	const [installedModels, setInstalledModels] = React.useState<LlamaInstalledModelInfo[]>([]);
+	const [selectedModel, setSelectedModel] = React.useState<LlamaInstalledModelInfo | null>(null);
 	const [serverStatus, setServerStatus] = React.useState<"stopped" | "starting" | "running" | "error">("stopped");
 	const [showModelPicker, setShowModelPicker] = React.useState(false);
 	const [showModePicker, setShowModePicker] = React.useState(false);
 	const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
 	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
-	const [downloadCatalog, setDownloadCatalog] = React.useState<LMSModelEntry[]>(LMS_MODEL_CATALOG_FALLBACK);
+	const [downloadCatalog, setDownloadCatalog] = React.useState<LlamaModelEntry[]>(LLAMA_MODEL_CATALOG_FALLBACK);
 	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, PullProgressEvent>>(new Map());
 	const [isLoadingModel, setIsLoadingModel] = React.useState(false);
 	const [streamingText, setStreamingText] = React.useState<string | null>(null);
@@ -58,7 +58,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 	React.useEffect(() => {
 		const checkServer = async () => {
-			const healthy = await lmsServerService.isServerHealthy();
+			const healthy = await llamaServerService.isServerHealthy();
 			if (healthy) {
 				setServerStatus("running");
 				const models = await chatService.getInstalledModels();
@@ -68,7 +68,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					chatService.currentModel = models[0];
 					setIsLoadingModel(true);
 					try {
-						await lmsServerService.loadModel(models[0].id);
+						await llamaServerService.loadModel(models[0].id);
 					} catch (error) {
 						console.error("Failed to load initial model:", error);
 					} finally {
@@ -79,7 +79,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		};
 		checkServer();
 
-		const unsubStatus = lmsServerService.onDidChangeStatus((status) => {
+		const unsubStatus = llamaServerService.onDidChangeStatus((status) => {
 			setServerStatus(status);
 		});
 
@@ -114,7 +114,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			});
 		});
 
-		const unsubPull = lmsServerService.onDidPullProgress((event) => {
+		const unsubPull = llamaServerService.onDidPullProgress((event) => {
 			setDownloadProgress((prev) => {
 				const next = new Map(prev);
 				next.set(event.modelId, event);
@@ -228,7 +228,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		setStreamingText(null);
 	};
 
-	const handleSelectModel = async (model: LMSInstalledModelInfo) => {
+	const handleSelectModel = async (model: LlamaInstalledModelInfo) => {
 		console.log("[ChatPanel] handleSelectModel:", model.id, model.displayName);
 		setSelectedModel(model);
 		chatService.currentModel = model;
@@ -236,7 +236,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		setIsLoadingModel(true);
 		try {
 			console.log("[ChatPanel] calling loadModel...");
-			await lmsServerService.loadModel(model.id);
+			await llamaServerService.loadModel(model.id);
 			console.log("[ChatPanel] loadModel done ✓");
 		} catch (error) {
 			console.error("[ChatPanel] Failed to load model:", error);
@@ -246,10 +246,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		}
 	};
 
-	const handleDownloadModel = async (entry: LMSModelEntry) => {
+	const handleDownloadModel = async (entry: LlamaModelEntry) => {
 		setShowDownloadPanel(false);
 		try {
-			const installedModel = await lmsServerService.pullModel(entry.id, entry.quantization);
+			const installedModel = await llamaServerService.pullModel(entry.id, entry.quantization);
 			const models = await chatService.getInstalledModels();
 			setInstalledModels(models);
 			if (installedModel) {
@@ -271,13 +271,13 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			const catalog = await fetchModelCatalog();
 			setDownloadCatalog(catalog);
 		} catch {
-			setDownloadCatalog(LMS_MODEL_CATALOG_FALLBACK);
+			setDownloadCatalog(LLAMA_MODEL_CATALOG_FALLBACK);
 		}
 	};
 
 	const handleCancelDownload = async (modelId: string) => {
 		try {
-			await lmsServerService.cancelPullModel(modelId);
+			await llamaServerService.cancelPullModel(modelId);
 		} catch (error) {
 			console.error("Failed to cancel download:", error);
 		}
@@ -481,7 +481,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 										<button
 											className="cursor-pointer rounded-md border border-border-500 bg-sky px-4 py-1.5 text-xs text-white hover:opacity-90"
 											onClick={async () => {
-												await lmsServerService.startServer();
+												await llamaServerService.startServer();
 												const models = await chatService.getInstalledModels();
 												setInstalledModels(models);
 												if (models.length > 0) {
@@ -489,7 +489,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 													chatService.currentModel = models[0];
 													setIsLoadingModel(true);
 													try {
-														await lmsServerService.loadModel(models[0].id);
+														await llamaServerService.loadModel(models[0].id);
 													} catch (error) {
 														console.error("Failed to load model:", error);
 													} finally {

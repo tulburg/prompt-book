@@ -1,12 +1,12 @@
 import {
-	buildLMStudioChatCompletionRequest,
+	buildLlamaChatCompletionRequest,
 	filterModelTextContent,
-	toUserFacingLMStudioServerErrorMessage,
-} from "../lm-studio-chat-codec";
+	toUserFacingLlamaServerErrorMessage,
+} from "../llama-chat-codec";
 import type { AnthropicRequest, ChatTransportEvent } from "../types";
 import type { JsonObject } from "../tools/tool-types";
 
-const DEFAULT_SERVER_URL = "http://localhost:8123";
+const DEFAULT_SERVER_URL = "http://localhost:48123";
 
 export class LlamaChatAdapter {
 	async *stream(
@@ -17,19 +17,19 @@ export class LlamaChatAdapter {
 			throw new DOMException("Aborted", "AbortError");
 		}
 		const baseUrl = (options.serverUrl || DEFAULT_SERVER_URL).replace(/\/$/, "");
-		const lmsPayload = buildLMStudioChatCompletionRequest(request);
+		const llamaPayload = buildLlamaChatCompletionRequest(request);
 		const url = `${baseUrl}/v1/chat/completions`;
 		console.log("[LlamaAdapter] POST", url);
 		console.log("[LlamaAdapter] request.model:", request.model);
 		console.log("[LlamaAdapter] request.format:", request.format);
-		console.log("[LlamaAdapter] payload.model:", lmsPayload.model);
-		console.log("[LlamaAdapter] payload.stop:", lmsPayload.stop);
-		console.log("[LlamaAdapter] payload.messages:", lmsPayload.messages.map((m) => ({ role: m.role, contentLength: m.content?.length ?? 0, contentPreview: m.content?.slice(0, 100) ?? "" })));
-		console.log("[LlamaAdapter] FULL payload:", JSON.stringify(lmsPayload));
+		console.log("[LlamaAdapter] payload.model:", llamaPayload.model);
+		console.log("[LlamaAdapter] payload.stop:", llamaPayload.stop);
+		console.log("[LlamaAdapter] payload.messages:", llamaPayload.messages.map((m) => ({ role: m.role, contentLength: m.content?.length ?? 0, contentPreview: m.content?.slice(0, 100) ?? "" })));
+		console.log("[LlamaAdapter] FULL payload:", JSON.stringify(llamaPayload));
 		const response = await fetch(url, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(lmsPayload),
+			body: JSON.stringify(llamaPayload),
 			signal: options.signal,
 		});
 
@@ -39,8 +39,8 @@ export class LlamaChatAdapter {
 			const errorText = await response.text().catch(() => "");
 			console.error("[LlamaAdapter] request failed:", response.status, errorText);
 			throw new Error(
-				toUserFacingLMStudioServerErrorMessage(
-					`LM Studio chat completions request failed with status ${response.status}${errorText ? `: ${errorText}` : ""}`,
+				toUserFacingLlamaServerErrorMessage(
+					`Llama server chat completions request failed with status ${response.status}${errorText ? `: ${errorText}` : ""}`,
 				),
 			);
 		}

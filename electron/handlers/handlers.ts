@@ -1,7 +1,8 @@
 import { ipcMain } from "electron";
 import { spawn, spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
-import { buildLlamaServerArgs } from "./lms-config";
+import { buildLlamaServerArgs } from "./llama-config";
 import {
   downloadModelToLocalStore,
   emitDownloadProgress,
@@ -9,11 +10,12 @@ import {
 } from "./model-download";
 
 const isWindows = process.platform === "win32";
+const DEFAULT_LLAMA_PORT = "48123";
 
-function expandLmsPath(rawPath: string): string {
+function expandLlamaPath(rawPath: string): string {
   let result = rawPath;
   if (result.startsWith("~")) {
-    result = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", result.slice(1));
+    result = path.join(os.homedir(), result.slice(1));
   }
   result = result.replace(/%([^%]+)%/g, (_, key: string) => process.env[key] ?? `%${key}%`);
   return result;
@@ -42,13 +44,13 @@ function whichSync(cmd: string): string | undefined {
 function resolveLlamaBinaryPath(): string | undefined {
   const candidates = isWindows
     ? [
-        expandLmsPath("%LOCALAPPDATA%\\Microsoft\\WinGet\\Links\\llama-server.exe"),
-        expandLmsPath("%ProgramFiles%\\llama.cpp\\llama-server.exe"),
+        expandLlamaPath("%LOCALAPPDATA%\\Microsoft\\WinGet\\Links\\llama-server.exe"),
+        expandLlamaPath("%ProgramFiles%\\llama.cpp\\llama-server.exe"),
       ]
     : [
         "/opt/homebrew/bin/llama-server",
         "/usr/local/bin/llama-server",
-        expandLmsPath("~/.local/bin/llama-server"),
+        expandLlamaPath("~/.local/bin/llama-server"),
       ];
 
   for (const candidate of candidates) {
@@ -63,7 +65,7 @@ function resolveLlamaBinaryPath(): string | undefined {
   return whichSync(isWindows ? "llama-server.exe" : "llama-server") ?? whichSync("llama-server");
 }
 
-let lmsServerProcess: ReturnType<typeof spawn> | undefined;
+let llamaServerProcess: ReturnType<typeof spawn> | undefined;
 const activeModelDownloads = new Map<string, AbortController>();
 
 function splitDownloadSpecifier(modelId: string): { repoId: string; quantization?: string } {
@@ -77,19 +79,75 @@ function splitDownloadSpecifier(modelId: string): { repoId: string; quantization
   };
 }
 
-export function killLmsServer() {
-  if (lmsServerProcess) {
-    try { lmsServerProcess.kill(); } catch { /* ignore */ }
-    lmsServerProcess = undefined;
+export function killLlamaServer() {
+  if (llamaServerProcess) {
+    try { llamaServerProcess.kill(); } catch { /* ignore */ }
+    llamaServerProcess = undefined;
   }
 }
 
-export function registerLmsHandlers() {
-  ipcMain.handle("lms:is-binary-installed", async () => {
+async function startManagedLlamaServer(serverUrl: string): Promise<void> {
+  const binaryPath = resolveLlamaBinaryPath();
+  if (!binaryPath) {
+    throw new Error("llama-server binary not found. Please install llama.cpp first.");
+  }
+
+  let port = DEFAULT_LLAMA_PORT;
+  try {
+    const parsed = new URL(serverUrl);
+    port = parsed.port || DEFAULT_LLAMA_PORT;
+  } catch {
+    // use default
+  }
+
+  const modelsDir = getLocalModelsDir();
+  try {
+    require("fs").mkdirSync(modelsDir, { recursive: true });
+  } catch (error) {
+    console.warn("[LlamaServer] Failed to ensure local models dir:", modelsDir, error);
+  }
+
+  const args = buildLlamaServerArgs({
+    port,
+    localModelsDir: modelsDir,
+  });
+
+  if (llamaServerProcess) {
+    try {
+      llamaServerProcess.kill();
+    } catch {
+      // ignore
+    }
+  }
+
+  llamaServerProcess = spawn(binaryPath, args, {
+    env: { ...process.env },
+    detached: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  console.info("[LlamaServer] Starting managed server:", binaryPath, args);
+
+  llamaServerProcess.on("error", (error) => {
+    console.error("[LlamaServer] Server spawn error:", error);
+    llamaServerProcess = undefined;
+  });
+
+  llamaServerProcess.on("close", () => {
+    llamaServerProcess = undefined;
+  });
+}
+
+export async function ensureLlamaServerStarted(serverUrl = `http://localhost:${DEFAULT_LLAMA_PORT}`): Promise<void> {
+  await startManagedLlamaServer(serverUrl);
+}
+
+export function registerLlamaHandlers() {
+  ipcMain.handle("llama:is-binary-installed", async () => {
     return resolveLlamaBinaryPath() !== undefined;
   });
 
-  ipcMain.handle("lms:download-binary", async () => {
+  ipcMain.handle("llama:download-binary", async () => {
     return new Promise<void>((resolve, reject) => {
       const command = isWindows ? "winget" : "brew";
       const args = isWindows
@@ -112,7 +170,7 @@ export function registerLmsHandlers() {
     });
   });
 
-  ipcMain.handle("lms:download-model", async (event, modelId: string) => {
+  ipcMain.handle("llama:download-model", async (event, modelId: string) => {
     const abort = new AbortController();
     activeModelDownloads.set(modelId, abort);
     try {
@@ -144,67 +202,19 @@ export function registerLmsHandlers() {
     }
   });
 
-  ipcMain.handle("lms:cancel-download-model", async (_event, modelId: string) => {
+  ipcMain.handle("llama:cancel-download-model", async (_event, modelId: string) => {
     activeModelDownloads.get(modelId)?.abort();
     activeModelDownloads.delete(modelId);
   });
 
-  ipcMain.handle("lms:start-server", async (_event, serverUrl: string) => {
-    const binaryPath = resolveLlamaBinaryPath();
-    if (!binaryPath) {
-      throw new Error("llama-server binary not found. Please install llama.cpp first.");
-    }
-
-    let port = "8123";
-    try {
-      const parsed = new URL(serverUrl);
-      port = parsed.port || "8123";
-    } catch {
-      // use default
-    }
-
-    let modelsDir: string | undefined;
-    try {
-      const localModelsDir = getLocalModelsDir();
-      require("fs").accessSync(localModelsDir, require("fs").constants.F_OK);
-      modelsDir = localModelsDir;
-    } catch {
-      // no local models dir
-    }
-
-    const args = buildLlamaServerArgs({
-      port,
-      localModelsDir: modelsDir,
-    });
-
-    if (lmsServerProcess) {
-      try {
-        lmsServerProcess.kill();
-      } catch {
-        // ignore
-      }
-    }
-
-    lmsServerProcess = spawn(binaryPath, args, {
-      env: { ...process.env },
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    lmsServerProcess.on("error", (error) => {
-      console.error("[LMS] Server spawn error:", error);
-      lmsServerProcess = undefined;
-    });
-
-    lmsServerProcess.on("close", () => {
-      lmsServerProcess = undefined;
-    });
+  ipcMain.handle("llama:start-server", async (_event, serverUrl: string) => {
+    await startManagedLlamaServer(serverUrl);
   });
 
-  ipcMain.handle("lms:stop-server", async () => {
-    if (lmsServerProcess) {
-      lmsServerProcess.kill();
-      lmsServerProcess = undefined;
+  ipcMain.handle("llama:stop-server", async () => {
+    if (llamaServerProcess) {
+      llamaServerProcess.kill();
+      llamaServerProcess = undefined;
     }
   });
 }

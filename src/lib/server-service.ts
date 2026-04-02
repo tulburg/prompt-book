@@ -1,4 +1,4 @@
-export type LMServerStatus = "stopped" | "starting" | "running" | "error";
+export type LlamaServerStatus = "stopped" | "starting" | "running" | "error";
 
 import type { DownloadedModelArtifact, PullProgressEvent } from "./model-downloads";
 
@@ -14,7 +14,7 @@ export function normalizePullModelId(modelId: string, quantization?: string): st
 	return normalized;
 }
 
-export interface LMSInstalledModelInfo {
+export interface LlamaInstalledModelInfo {
 	id: string;
 	displayName: string;
 	maxContextLength?: number;
@@ -22,7 +22,7 @@ export interface LMSInstalledModelInfo {
 	trainedForToolUse?: boolean;
 }
 
-export interface LMSLoadModelOptions {
+export interface LlamaLoadModelOptions {
 	contextLength?: number;
 	serverUrl?: string;
 }
@@ -44,12 +44,12 @@ class SimpleEmitter<T> {
 	}
 }
 
-const DEFAULT_LLAMA_SERVER_URL = "http://localhost:8123";
+const DEFAULT_LLAMA_SERVER_URL = "http://localhost:48123";
 
 function resolveInstalledModelAfterDownload(
-	models: LMSInstalledModelInfo[],
+	models: LlamaInstalledModelInfo[],
 	artifact: DownloadedModelArtifact,
-): LMSInstalledModelInfo | null {
+): LlamaInstalledModelInfo | null {
 	const lowerFileName = artifact.fileName.toLowerCase();
 	const fileStem = lowerFileName.replace(/\.gguf$/i, "");
 
@@ -75,8 +75,8 @@ function resolveInstalledModelAfterDownload(
 	return ranked[0]?.model ?? null;
 }
 
-export class LMSServerService {
-	private readonly _onDidChangeStatus = new SimpleEmitter<LMServerStatus>();
+export class LlamaServerService {
+	private readonly _onDidChangeStatus = new SimpleEmitter<LlamaServerStatus>();
 	readonly onDidChangeStatus = this._onDidChangeStatus.on.bind(this._onDidChangeStatus);
 
 	private readonly _onDidLoadModel = new SimpleEmitter<void>();
@@ -88,10 +88,10 @@ export class LMSServerService {
 	private readonly _onDidPullProgress = new SimpleEmitter<PullProgressEvent>();
 	readonly onDidPullProgress = this._onDidPullProgress.on.bind(this._onDidPullProgress);
 
-	private _status: LMServerStatus = "stopped";
+	private _status: LlamaServerStatus = "stopped";
 	private _pullAborts = new Map<string, AbortController>();
 
-	get status(): LMServerStatus {
+	get status(): LlamaServerStatus {
 		return this._status;
 	}
 
@@ -118,12 +118,12 @@ export class LMSServerService {
 		}
 	}
 
-	async listInstalledModels(serverUrl?: string): Promise<LMSInstalledModelInfo[]> {
+	async listInstalledModels(serverUrl?: string): Promise<LlamaInstalledModelInfo[]> {
 		const baseUrl = this.normalizeServerUrl(serverUrl);
-		console.log("[LMS] listInstalledModels → GET", `${baseUrl}/models`);
+		console.log("[LlamaServer] listInstalledModels → GET", `${baseUrl}/models`);
 		const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(4000) });
 		if (!response.ok) {
-			console.error("[LMS] listInstalledModels failed:", response.status);
+			console.error("[LlamaServer] listInstalledModels failed:", response.status);
 			throw new Error(`GET /models failed with HTTP ${response.status}`);
 		}
 
@@ -132,7 +132,7 @@ export class LMSServerService {
 			| Array<{ id?: string; meta?: { max_context_length?: number; n_ctx_train?: number; multimodal?: boolean; tools?: boolean } }>;
 
 		const models = Array.isArray(payload) ? payload : payload.data ?? [];
-		console.log("[LMS] listInstalledModels raw response:", JSON.stringify(payload, null, 2));
+		console.log("[LlamaServer] listInstalledModels raw response:", JSON.stringify(payload, null, 2));
 
 		const result = models
 			.filter((model) => !!model.id)
@@ -147,7 +147,7 @@ export class LMSServerService {
 					trainedForToolUse: model.meta?.tools,
 				};
 			});
-		console.log("[LMS] listInstalledModels result:", result.map((m) => m.id));
+		console.log("[LlamaServer] listInstalledModels result:", result.map((m) => m.id));
 		return result;
 	}
 
@@ -164,15 +164,15 @@ export class LMSServerService {
 		}
 	}
 
-	async loadModel(modelId: string, options: LMSLoadModelOptions = {}): Promise<void> {
+	async loadModel(modelId: string, options: LlamaLoadModelOptions = {}): Promise<void> {
 		const baseUrl = this.normalizeServerUrl(options.serverUrl);
 		const normalizedModelId = normalizePullModelId(modelId);
 
-		console.log("[LMS] loadModel called:", { modelId, normalizedModelId, baseUrl });
+		console.log("[LlamaServer] loadModel called:", { modelId, normalizedModelId, baseUrl });
 
 		const existingStatus = await this.getModelStatus(baseUrl, normalizedModelId);
 		if (existingStatus === "loaded") {
-			console.log("[LMS] loadModel: already loaded, skipping");
+			console.log("[LlamaServer] loadModel: already loaded, skipping");
 			this._onDidLoadProgress.fire(100);
 			this._onDidLoadModel.fire();
 			return;
@@ -188,32 +188,32 @@ export class LMSServerService {
 		try {
 			const url = `${baseUrl}/models/load`;
 			const body = JSON.stringify({ model: normalizedModelId });
-			console.log("[LMS] loadModel → POST", url, body);
+			console.log("[LlamaServer] loadModel → POST", url, body);
 			const response = await fetch(url, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body,
 			});
 			const responseText = await response.text().catch(() => "");
-			console.log("[LMS] loadModel POST response:", { status: response.status, body: responseText });
+			console.log("[LlamaServer] loadModel POST response:", { status: response.status, body: responseText });
 			if (!response.ok) {
 				if (!(response.status === 400 && /model is already loaded/i.test(responseText))) {
 					throw new Error(`Failed to load model: HTTP ${response.status}${responseText ? ` — ${responseText}` : ""}`);
 				}
-				console.log("[LMS] loadModel: already-loaded response, done");
+				console.log("[LlamaServer] loadModel: already-loaded response, done");
 				this._onDidLoadProgress.fire(100);
 				this._onDidLoadModel.fire();
 				return;
 			}
 
-			console.log("[LMS] loadModel: waiting for model to finish loading...");
+			console.log("[LlamaServer] loadModel: waiting for model to finish loading...");
 			const deadline = Date.now() + 120_000;
 			while (Date.now() < deadline) {
 				await new Promise((r) => setTimeout(r, 1000));
 				const status = await this.getModelStatus(baseUrl, normalizedModelId);
-				console.log("[LMS] loadModel poll:", { modelId: normalizedModelId, status });
+				console.log("[LlamaServer] loadModel poll:", { modelId: normalizedModelId, status });
 				if (status === "loaded") {
-					console.log("[LMS] loadModel: model is now loaded ✓");
+					console.log("[LlamaServer] loadModel: model is now loaded ✓");
 					this._onDidLoadProgress.fire(100);
 					this._onDidLoadModel.fire();
 					return;
@@ -226,14 +226,14 @@ export class LMSServerService {
 
 			throw new Error("Timed out waiting for model to load (120s)");
 		} catch (error) {
-			console.error("[LMS] loadModel error:", error);
+			console.error("[LlamaServer] loadModel error:", error);
 			throw error;
 		} finally {
 			clearInterval(timer);
 		}
 	}
 
-	async pullModel(modelId: string, quantization?: string): Promise<LMSInstalledModelInfo | null> {
+	async pullModel(modelId: string, quantization?: string): Promise<LlamaInstalledModelInfo | null> {
 		const normalizedModelId = normalizePullModelId(modelId, quantization);
 		const abort = new AbortController();
 		this._pullAborts.set(normalizedModelId, abort);
@@ -247,13 +247,13 @@ export class LMSServerService {
 		let unsubProgress: (() => void) | undefined;
 		try {
 			let artifact: DownloadedModelArtifact | null = null;
-			if (window.lmsBridge) {
-				unsubProgress = window.lmsBridge.onDownloadProgress((data) => {
+			if (window.llamaBridge) {
+				unsubProgress = window.llamaBridge.onDownloadProgress((data) => {
 					this._onDidPullProgress.fire(data);
 				});
-				artifact = await window.lmsBridge.downloadModel(normalizedModelId);
+				artifact = await window.llamaBridge.downloadModel(normalizedModelId);
 			} else {
-				artifact = await window.ipcRenderer.invoke("lms:download-model", normalizedModelId) as DownloadedModelArtifact;
+				artifact = await window.ipcRenderer.invoke("llama:download-model", normalizedModelId) as DownloadedModelArtifact;
 			}
 
 			if (abort.signal.aborted) {
@@ -305,11 +305,11 @@ export class LMSServerService {
 			phase: "cancelled",
 			message: "Download cancelled.",
 		});
-		if (window.lmsBridge) {
-			await window.lmsBridge.cancelDownloadModel(normalizedModelId);
+		if (window.llamaBridge) {
+			await window.llamaBridge.cancelDownloadModel(normalizedModelId);
 			return;
 		}
-		await window.ipcRenderer.invoke("lms:cancel-download-model", normalizedModelId);
+		await window.ipcRenderer.invoke("llama:cancel-download-model", normalizedModelId);
 	}
 
 	async startServer(serverUrl?: string): Promise<void> {
@@ -323,10 +323,10 @@ export class LMSServerService {
 		}
 
 		try {
-			if (window.lmsBridge) {
-				await window.lmsBridge.startServer(baseUrl);
+			if (window.llamaBridge) {
+				await window.llamaBridge.startServer(baseUrl);
 			} else {
-				await window.ipcRenderer.invoke("lms:start-server", baseUrl);
+				await window.ipcRenderer.invoke("llama:start-server", baseUrl);
 			}
 			await this.waitForServer(baseUrl);
 		} catch {
@@ -336,10 +336,10 @@ export class LMSServerService {
 
 	async stopServer(_serverUrl?: string): Promise<void> {
 		try {
-			if (window.lmsBridge) {
-				await window.lmsBridge.stopServer();
+			if (window.llamaBridge) {
+				await window.llamaBridge.stopServer();
 			} else {
-				await window.ipcRenderer.invoke("lms:stop-server");
+				await window.ipcRenderer.invoke("llama:stop-server");
 			}
 			this._setStatus("stopped");
 		} catch {
@@ -349,21 +349,21 @@ export class LMSServerService {
 
 	async isBinaryInstalled(): Promise<boolean> {
 		try {
-			if (window.lmsBridge) {
-				return await window.lmsBridge.isBinaryInstalled();
+			if (window.llamaBridge) {
+				return await window.llamaBridge.isBinaryInstalled();
 			}
-			return await window.ipcRenderer.invoke("lms:is-binary-installed") as boolean;
+			return await window.ipcRenderer.invoke("llama:is-binary-installed") as boolean;
 		} catch {
 			return false;
 		}
 	}
 
 	async downloadBinary(): Promise<void> {
-		if (window.lmsBridge) {
-			await window.lmsBridge.downloadBinary();
+		if (window.llamaBridge) {
+			await window.llamaBridge.downloadBinary();
 			return;
 		}
-		await window.ipcRenderer.invoke("lms:download-binary");
+		await window.ipcRenderer.invoke("llama:download-binary");
 	}
 
 	private async waitForServer(baseUrl: string, timeoutMs = 25000, intervalMs = 500): Promise<void> {
@@ -379,7 +379,7 @@ export class LMSServerService {
 		this._setStatus("running");
 	}
 
-	private _setStatus(status: LMServerStatus): void {
+	private _setStatus(status: LlamaServerStatus): void {
 		if (this._status === status) {
 			return;
 		}
@@ -388,4 +388,4 @@ export class LMSServerService {
 	}
 }
 
-export const lmsServerService = new LMSServerService();
+export const llamaServerService = new LlamaServerService();

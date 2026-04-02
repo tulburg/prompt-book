@@ -1,13 +1,13 @@
 /**
- * Integration test — hits the real llama-server at localhost:8123.
+ * Integration test — hits the real llama-server at localhost:48123.
  * Mirrors exactly what the UI does: load model → build request → stream response.
  *
  * Run manually:  npx vitest run src/lib/chat/transports/llama-adapter.integration.test.ts
  */
 import { describe, expect, it } from "vitest";
 
-const SERVER_URL = "http://localhost:8123";
-const QWEN_MODEL_ID = "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF";
+const SERVER_URL = "http://localhost:48123";
+const QWEN_MODEL_ID = "bartowski/Qwen3-Coder-30B-A3B-Instruct-GGUF";
 
 async function getModelStatus(modelId: string): Promise<string | null> {
 	try {

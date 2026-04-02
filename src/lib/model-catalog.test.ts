@@ -10,12 +10,12 @@ describe("model catalog", () => {
 	it("merges the curated Qwen 3.5 search results into the catalog", async () => {
 		const fetchMock = vi.fn((input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url.includes("author=lmstudio-community")) {
+			if (url.includes("author=bartowski")) {
 				return Promise.resolve(
 					new Response(
 						JSON.stringify([
 							{
-								id: "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+								id: "bartowski/Qwen3-Coder-30B-A3B-Instruct-GGUF",
 								downloads: 1200,
 								tags: ["gguf", "text-generation"],
 							},
@@ -44,13 +44,13 @@ describe("model catalog", () => {
 		const catalog = await fetchModelCatalog();
 
 		expect(catalog.some((entry) => entry.id === "unsloth/Qwen3.5-9B-GGUF")).toBe(true);
-		expect(catalog.some((entry) => entry.id === "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF")).toBe(true);
+		expect(catalog.some((entry) => entry.id === "bartowski/Qwen3-Coder-30B-A3B-Instruct-GGUF")).toBe(true);
 	});
 
 	it("filters out uncensored and vision-focused GGUF repositories", async () => {
 		const fetchMock = vi.fn((input: RequestInfo | URL) => {
 			const url = String(input);
-			if (!url.includes("author=lmstudio-community")) {
+			if (!url.includes("author=bartowski")) {
 				return Promise.resolve(new Response(JSON.stringify([])));
 			}
 			return Promise.resolve(

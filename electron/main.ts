@@ -2,7 +2,7 @@ import { Menu, app, BrowserWindow, screen } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { registerAllHandlers, killLmsServer, store } from "./handlers";
+import { ensureLlamaServerStarted, registerAllHandlers, killLlamaServer, store } from "./handlers";
 
 createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -216,7 +216,7 @@ function createWindow() {
 
 app.on("before-quit", () => {
   saveWindowState();
-  killLmsServer();
+  killLlamaServer();
 });
 
 app.on("window-all-closed", () => {
@@ -236,5 +236,8 @@ app.on("activate", () => {
 app.whenReady().then(() => {
   setApplicationMenu();
   registerAllHandlers(win);
+  void ensureLlamaServerStarted().catch((error) => {
+    console.error("[LlamaServer] Failed to start on app launch:", error);
+  });
   createWindow();
 });

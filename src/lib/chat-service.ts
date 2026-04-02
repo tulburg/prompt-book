@@ -13,7 +13,7 @@ import type {
 	ChatTranscriptEntry,
 	ChatUiEvent,
 } from "./chat/types";
-import { lmsServerService, type LMSInstalledModelInfo } from "./server-service";
+import { llamaServerService, type LlamaInstalledModelInfo } from "./server-service";
 
 type Listener<T> = (value: T) => void;
 
@@ -41,7 +41,7 @@ export class ChatService {
 
 	private readonly store = new ChatSessionStore();
 	private readonly transport = new LlamaChatAdapter();
-	private _currentModel: LMSInstalledModelInfo | null = null;
+	private _currentModel: LlamaInstalledModelInfo | null = null;
 	private _abortController: AbortController | null = null;
 	private _streamingSessionId: string | null = null;
 	private _isSending = false;
@@ -63,7 +63,7 @@ export class ChatService {
 		return this.store.getActiveSnapshot();
 	}
 
-	get currentModel(): LMSInstalledModelInfo | null {
+	get currentModel(): LlamaInstalledModelInfo | null {
 		return this._currentModel;
 	}
 
@@ -71,7 +71,7 @@ export class ChatService {
 		return this._streamingSessionId;
 	}
 
-	set currentModel(model: LMSInstalledModelInfo | null) {
+	set currentModel(model: LlamaInstalledModelInfo | null) {
 		this._currentModel = model;
 		const active = this.activeSession;
 		if (!active) return;
@@ -340,9 +340,9 @@ export class ChatService {
 		this._abortController = null;
 	}
 
-	async getInstalledModels(serverUrl?: string): Promise<LMSInstalledModelInfo[]> {
+	async getInstalledModels(serverUrl?: string): Promise<LlamaInstalledModelInfo[]> {
 		try {
-			return await lmsServerService.listInstalledModels(serverUrl);
+			return await llamaServerService.listInstalledModels(serverUrl);
 		} catch {
 			return [];
 		}

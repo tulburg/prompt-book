@@ -1,4 +1,4 @@
-export interface LMSModelEntry {
+export interface LlamaModelEntry {
 	readonly id: string;
 	readonly quantization: string;
 	readonly name: string;
@@ -15,10 +15,10 @@ interface HFModelInfo {
 	pipeline_tag?: string;
 }
 
-export async function fetchModelCatalog(signal?: AbortSignal): Promise<LMSModelEntry[]> {
+export async function fetchModelCatalog(signal?: AbortSignal): Promise<LlamaModelEntry[]> {
 	const controller = signal ? null : AbortSignal.timeout(8000);
 	const queries = [
-		"https://huggingface.co/api/models?author=lmstudio-community&filter=gguf&sort=downloads&direction=-1&limit=60",
+		"https://huggingface.co/api/models?author=bartowski&filter=gguf&sort=downloads&direction=-1&limit=60",
 		"https://huggingface.co/api/models?author=unsloth&search=Qwen3.5&filter=gguf&sort=downloads&direction=-1&limit=20",
 		"https://huggingface.co/api/models?author=Qwen&search=Qwen3.5&filter=gguf&sort=downloads&direction=-1&limit=20",
 	];
@@ -43,7 +43,7 @@ export async function fetchModelCatalog(signal?: AbortSignal): Promise<LMSModelE
 		}
 	}
 
-	const entries: LMSModelEntry[] = Array.from(deduped.values())
+	const entries: LlamaModelEntry[] = Array.from(deduped.values())
 		.filter((model) => isUsableModel(model))
 		.sort((a, b) => {
 			const scoreDiff = getCatalogPriority(a) - getCatalogPriority(b);
@@ -51,7 +51,7 @@ export async function fetchModelCatalog(signal?: AbortSignal): Promise<LMSModelE
 			return b.downloads - a.downloads;
 		})
 		.map((m) => toEntry(m))
-		.filter((e): e is LMSModelEntry => e !== null);
+		.filter((e): e is LlamaModelEntry => e !== null);
 
 	const recommendedIdx = entries.findIndex((e) => isCodingModel(e.name));
 	const idx = recommendedIdx >= 0 ? recommendedIdx : 0;
@@ -138,7 +138,7 @@ function getCatalogPriority(model: HFModelInfo): number {
 	return 2;
 }
 
-function toEntry(m: HFModelInfo): LMSModelEntry | null {
+function toEntry(m: HFModelInfo): LlamaModelEntry | null {
 	const repo = m.id.split("/").pop();
 	if (!repo) {
 		return null;
@@ -191,9 +191,9 @@ function isCodingModel(name: string): boolean {
 	return lower.includes("coder") || lower.includes("code") || lower.includes("starcoder");
 }
 
-const HF = "lmstudio-community";
+const HF = "bartowski";
 
-export const LMS_MODEL_CATALOG_FALLBACK: LMSModelEntry[] = [
+export const LLAMA_MODEL_CATALOG_FALLBACK: LlamaModelEntry[] = [
 	{
 		id: `${HF}/Qwen2.5-Coder-7B-Instruct-GGUF`,
 		quantization: "",

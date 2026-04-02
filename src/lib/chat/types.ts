@@ -2,7 +2,6 @@ import type {
 	ChatToolDisplay,
 	NativeToolDefinition,
 	JsonObject,
-	JsonValue,
 } from "./tools/tool-types";
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";

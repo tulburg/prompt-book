@@ -3,11 +3,12 @@ import type { WebContents } from "electron";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, rename, stat, unlink } from "node:fs/promises";
 import { once } from "node:events";
+import os from "node:os";
 import path from "node:path";
 import type { DownloadedModelArtifact, PullProgressEvent } from "../../src/lib/model-downloads";
 
 const isWindows = process.platform === "win32";
-const DOWNLOAD_PROGRESS_CHANNEL = "lms:download-progress";
+const DOWNLOAD_PROGRESS_CHANNEL = "llama:download-progress";
 
 const DEFAULT_QUANTIZATION_PREFERENCE = [
 	"Q4_K_M",
@@ -22,10 +23,10 @@ const DEFAULT_QUANTIZATION_PREFERENCE = [
 	"F16",
 ];
 
-function expandLmsPath(rawPath: string): string {
+function expandLlamaPath(rawPath: string): string {
 	let result = rawPath;
 	if (result.startsWith("~")) {
-		result = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", result.slice(1));
+		result = path.join(os.homedir(), result.slice(1));
 	}
 	result = result.replace(/%([^%]+)%/g, (_, key: string) => process.env[key] ?? `%${key}%`);
 	return result;
@@ -33,10 +34,10 @@ function expandLmsPath(rawPath: string): string {
 
 export function getLocalModelsDir(): string {
 	return isWindows
-		? expandLmsPath("%LOCALAPPDATA%\\llama.cpp\\local-models")
+		? expandLlamaPath("%LOCALAPPDATA%\\llama.cpp\\local-models")
 		: process.platform === "darwin"
-			? expandLmsPath("~/Library/Caches/llama.cpp/local-models")
-			: expandLmsPath("~/.cache/llama.cpp/local-models");
+			? expandLlamaPath("~/Library/Caches/llama.cpp/local-models")
+			: expandLlamaPath("~/.cache/llama.cpp/local-models");
 }
 
 export function emitDownloadProgress(sender: WebContents, event: PullProgressEvent): void {

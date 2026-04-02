@@ -25,7 +25,7 @@ declare global {
 		nativeContextMenu?: NativeContextMenuBridge;
 		projectBridge?: ProjectBridge;
 		settingsBridge?: SettingsBridge;
-		lmsBridge?: {
+		llamaBridge?: {
 			isBinaryInstalled: () => Promise<boolean>;
 			downloadBinary: () => Promise<void>;
 			downloadModel: (modelId: string) => Promise<DownloadedModelArtifact>;

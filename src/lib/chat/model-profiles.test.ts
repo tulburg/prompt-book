@@ -24,7 +24,7 @@ describe("chat model profiles", () => {
 
 	it("matches openai-compatible local models by token", () => {
 		const profile = resolveChatModelProfile({
-				modelId: "lmstudio-community/gpt-oss-20b",
+				modelId: "bartowski/gpt-oss-20b",
 				modelName: "GPT OSS 20B",
 			});
 		expect(profile.id).toBe("openai");

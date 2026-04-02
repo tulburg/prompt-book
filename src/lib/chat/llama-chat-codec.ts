@@ -2,7 +2,7 @@ import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "./system-prompt";
 import type { ChatToolJsonSchema } from "./tools/tool-types";
 import type { AnthropicRequest } from "./types";
 
-export interface LMStudioChatMessage {
+export interface LlamaChatMessage {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string | null;
 	tool_calls?: Array<{
@@ -17,7 +17,7 @@ export interface LMStudioChatMessage {
 	name?: string;
 }
 
-export interface LMStudioNativeTool {
+export interface LlamaNativeTool {
 	type: "function";
 	function: {
 		name: string;
@@ -26,13 +26,13 @@ export interface LMStudioNativeTool {
 	};
 }
 
-export interface LMStudioChatCompletionRequest {
+export interface LlamaChatCompletionRequest {
 	model: string;
-	messages: LMStudioChatMessage[];
+	messages: LlamaChatMessage[];
 	stream: boolean;
 	temperature: number;
 	stop: string[];
-	tools?: LMStudioNativeTool[];
+	tools?: LlamaNativeTool[];
 	tool_choice?: "auto" | "none";
 }
 
@@ -50,8 +50,8 @@ function stripSentinels(text: string): string {
 	return text.split(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).join("").trim();
 }
 
-function mergeConsecutiveSameRole(messages: LMStudioChatMessage[]): LMStudioChatMessage[] {
-	const merged: LMStudioChatMessage[] = [];
+function mergeConsecutiveSameRole(messages: LlamaChatMessage[]): LlamaChatMessage[] {
+	const merged: LlamaChatMessage[] = [];
 	for (const msg of messages) {
 		const prev = merged.at(-1);
 		if (
@@ -69,7 +69,7 @@ function mergeConsecutiveSameRole(messages: LMStudioChatMessage[]): LMStudioChat
 	return merged;
 }
 
-export function toLMStudioMessages(request: AnthropicRequest): LMStudioChatMessage[] {
+export function toLlamaMessages(request: AnthropicRequest): LlamaChatMessage[] {
 	const systemMessages = request.system
 		.map((content) => stripSentinels(content))
 		.filter((content) => content.length > 0)
@@ -79,7 +79,7 @@ export function toLMStudioMessages(request: AnthropicRequest): LMStudioChatMessa
 		}));
 
 	const conversationMessages = request.messages.map((message) => ({
-		role: message.role as LMStudioChatMessage["role"],
+		role: message.role as LlamaChatMessage["role"],
 		content: message.content ? flattenBlocks(message.content) : null,
 		tool_calls: message.tool_calls,
 		tool_call_id: message.tool_call_id,
@@ -96,12 +96,12 @@ const STOP_SEQUENCES_BY_FORMAT: Record<AnthropicRequest["format"], string[]> = {
 	anthropic: [],
 };
 
-export function buildLMStudioChatCompletionRequest(
+export function buildLlamaChatCompletionRequest(
 	request: AnthropicRequest,
-): LMStudioChatCompletionRequest {
+): LlamaChatCompletionRequest {
 	return {
 		model: request.model,
-		messages: toLMStudioMessages(request),
+		messages: toLlamaMessages(request),
 		stream: request.stream,
 		temperature: 0.7,
 		stop: STOP_SEQUENCES_BY_FORMAT[request.format] ?? [],
@@ -114,7 +114,7 @@ export function filterModelTextContent(content: string): string {
 	return content.replace(/<\|[^|>]*\|>/g, "");
 }
 
-export function toUserFacingLMStudioServerErrorMessage(rawMessage: string): string {
+export function toUserFacingLlamaServerErrorMessage(rawMessage: string): string {
 	if (/n_keep.*n_ctx|context.*length|token.*limit|context.*window|context size has been exceeded/i.test(rawMessage)) {
 		return "The selected model context window is too small for this conversation. Switch to a larger-context model or start a new chat.";
 	}
