@@ -15,7 +15,7 @@ export function buildLMStudioHistoryFingerprint(request: AnthropicRequest): stri
 		system: request.system,
 		messages: request.messages.map((message) => ({
 			role: message.role,
-			content: message.content.map((part) => part.text).join(""),
+			content: message.content?.map((part) => part.text).join("") ?? "",
 		})),
 	});
 }

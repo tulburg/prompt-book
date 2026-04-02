@@ -16,6 +16,7 @@ export interface ChatModelProfile {
 	toolResultMode: "tool" | "user";
 	httpRolePattern: "openai" | "alternatingUserAssistant";
 	systemSeparator: string;
+	nativeToolCalling: "supported" | "unsupported";
 }
 
 const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
@@ -31,6 +32,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "tool",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
+		nativeToolCalling: "supported",
 	},
 	{
 		id: "qwen",
@@ -44,6 +46,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "tool",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
+		nativeToolCalling: "supported",
 	},
 	{
 		id: "gemma",
@@ -57,6 +60,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "user",
 		httpRolePattern: "alternatingUserAssistant",
 		systemSeparator: "\n\n",
+		nativeToolCalling: "supported",
 	},
 	{
 		id: "anthropic",
@@ -70,6 +74,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "tool",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
+		nativeToolCalling: "unsupported",
 	},
 	{
 		id: "default",
@@ -81,6 +86,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "tool",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
+		nativeToolCalling: "unsupported",
 	},
 ] as const;
 

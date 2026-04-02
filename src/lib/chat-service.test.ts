@@ -5,6 +5,7 @@ import { ChatService } from "@/lib/chat-service";
 describe("chat service", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		window.localStorage.clear();
 	});
 
 	it("sends the accepted user turn once and forwards the active mode", async () => {
@@ -161,5 +162,63 @@ describe("chat service", () => {
 					message.content === "*[Model produced repeated output — response stopped automatically]*",
 			),
 		).toBe(false);
+	});
+
+	it("executes a native tool loop and stores tool transcript entries", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: "",
+									tool_calls: [
+										{
+											id: "call_1",
+											function: {
+												name: "StructuredOutput",
+												arguments: JSON.stringify({ step: "done" }),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "Finished after tool." } }],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "openai/gpt-oss-20b",
+			displayName: "GPT OSS 20B",
+		};
+		service.createSession();
+
+		await service.sendMessage("Use a tool");
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		const messages = service.activeSession?.messages ?? [];
+		expect(messages.some((message) => message.subtype === "tool_use")).toBe(true);
+		expect(messages.some((message) => message.subtype === "tool_result")).toBe(true);
+		expect(messages.at(-1)?.content).toBe("Finished after tool.");
 	});
 });

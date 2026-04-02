@@ -1,0 +1,61 @@
+import type { ChatToolDefinition } from "@/lib/chat/tools/tool-types";
+
+import { createUnsupportedTool } from "./helpers";
+
+export const unsupportedAdvancedTools: ChatToolDefinition[] = [
+	createUnsupportedTool({
+		name: "LSP",
+		source: "claude",
+		category: "advanced",
+		uiKind: "json",
+		description: "Use language-server powered code intelligence.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: true },
+		readOnly: true,
+		concurrencySafe: true,
+		reason: "LSP-backed chat tools are not wired into Prompt Book yet.",
+	}),
+	createUnsupportedTool({
+		name: "ListMcpResourcesTool",
+		source: "claude",
+		category: "mcp",
+		uiKind: "file_list",
+		description: "List resources from an MCP server.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: true },
+		readOnly: true,
+		concurrencySafe: true,
+		reason: "MCP resource listing is not yet connected to the local tool runtime.",
+	}),
+	createUnsupportedTool({
+		name: "ReadMcpResourceTool",
+		source: "claude",
+		category: "mcp",
+		uiKind: "input_output",
+		description: "Read a resource from an MCP server.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: true },
+		readOnly: true,
+		concurrencySafe: true,
+		reason: "MCP resource reads are not yet connected to the local tool runtime.",
+	}),
+	createUnsupportedTool({
+		name: "TeamCreate",
+		source: "claude",
+		category: "advanced",
+		uiKind: "text",
+		description: "Create an agent team.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: true },
+		readOnly: false,
+		concurrencySafe: false,
+		reason: "Agent team orchestration is not implemented in Prompt Book.",
+	}),
+	createUnsupportedTool({
+		name: "TeamDelete",
+		source: "claude",
+		category: "advanced",
+		uiKind: "text",
+		description: "Delete an agent team.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: true },
+		readOnly: false,
+		concurrencySafe: false,
+		reason: "Agent team orchestration is not implemented in Prompt Book.",
+	}),
+];

@@ -1,4 +1,11 @@
-export type ChatRole = "user" | "assistant" | "system";
+import type {
+	ChatToolDisplay,
+	NativeToolDefinition,
+	JsonObject,
+	JsonValue,
+} from "./tools/tool-types";
+
+export type ChatRole = "user" | "assistant" | "system" | "tool";
 
 export type ChatMode = "Agent" | "Ask" | "Edit";
 
@@ -9,7 +16,25 @@ export type TranscriptSubtype =
 	| "user_context"
 	| "error"
 	| "interruption"
-	| "message";
+	| "message"
+	| "tool_use"
+	| "tool_result";
+
+export interface ChatToolInvocationRecord {
+	toolCallId: string;
+	toolName: string;
+	input: JsonObject;
+}
+
+export interface ChatToolResultRecord {
+	toolCallId: string;
+	toolName: string;
+	input: JsonObject;
+	outputText: string;
+	display?: ChatToolDisplay;
+	isError?: boolean;
+	structuredContent?: JsonObject;
+}
 
 export interface ChatMessage {
 	id: string;
@@ -18,6 +43,8 @@ export interface ChatMessage {
 	timestamp: number;
 	isStreaming?: boolean;
 	subtype?: TranscriptSubtype;
+	toolInvocation?: ChatToolInvocationRecord;
+	toolResult?: ChatToolResultRecord;
 }
 
 export interface ChatTranscriptEntry {
@@ -30,6 +57,8 @@ export interface ChatTranscriptEntry {
 	includeInHistory: boolean;
 	isMeta?: boolean;
 	subtype?: TranscriptSubtype;
+	toolInvocation?: ChatToolInvocationRecord;
+	toolResult?: ChatToolResultRecord;
 }
 
 export interface ChatSessionState {
@@ -39,6 +68,11 @@ export interface ChatSessionState {
 	modelId: string | null;
 	createdAt: number;
 	bootstrappedAt: number;
+	todos: Array<{
+		id: string;
+		content: string;
+		status: "pending" | "in_progress" | "completed" | "cancelled";
+	}>;
 	transcript: ChatTranscriptEntry[];
 }
 
@@ -51,17 +85,32 @@ export interface AnthropicTextBlock {
 	text: string;
 }
 
-export interface AnthropicMessage {
-	role: "user" | "assistant";
-	content: AnthropicTextBlock[];
+export interface ChatApiToolCall {
+	id: string;
+	type: "function";
+	function: {
+		name: string;
+		arguments: string;
+	};
+}
+
+export interface ChatApiMessage {
+	role: "user" | "assistant" | "tool";
+	content: AnthropicTextBlock[] | null;
+	tool_calls?: ChatApiToolCall[];
+	tool_call_id?: string;
+	name?: string;
 }
 
 export interface AnthropicRequest {
 	model: string;
 	system: string[];
-	messages: AnthropicMessage[];
+	messages: ChatApiMessage[];
 	stream: boolean;
 	format: "anthropic" | "openai" | "qwen" | "gemma";
+	tools?: NativeToolDefinition[];
+	tool_choice?: "auto" | "none";
+	nativeToolCalling?: boolean;
 	metadata: {
 		sessionId: string;
 		mode: ChatMode;
@@ -80,6 +129,14 @@ export type ChatStreamMode = "idle" | "requesting" | "responding";
 export type ChatTransportEvent =
 	| { type: "message_start" }
 	| { type: "content_delta"; text: string }
+	| {
+			type: "tool_calls";
+			calls: Array<{
+				id: string;
+				name: string;
+				input: JsonObject;
+			}>;
+	  }
 	| { type: "message_stop" };
 
 export type ChatUiEvent =

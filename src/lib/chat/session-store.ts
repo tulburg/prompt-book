@@ -6,6 +6,14 @@ import type {
 	ChatTranscriptEntry,
 } from "./types";
 
+const STORAGE_KEY = "prompt-book.chat-session-store.v1";
+
+type PersistedChatState = {
+	sessions: ChatSessionState[];
+	activeSessionId: string | null;
+	defaultMode: ChatMode;
+};
+
 function generateId(): string {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -33,12 +41,15 @@ function deriveMessages(transcript: ChatTranscriptEntry[]): ChatMessage[] {
 			timestamp: entry.timestamp,
 			isStreaming: entry.isStreaming,
 			subtype: entry.subtype,
+			toolInvocation: entry.toolInvocation,
+			toolResult: entry.toolResult,
 		}));
 }
 
 function toSnapshot(session: ChatSessionState): ChatSession {
 	return {
 		...session,
+		todos: session.todos.map((item) => ({ ...item })),
 		transcript: session.transcript.map((entry) => ({ ...entry })),
 		messages: deriveMessages(session.transcript),
 	};
@@ -54,6 +65,62 @@ export class ChatSessionStore {
 	private sessions: ChatSessionState[] = [];
 	private activeSessionId: string | null = null;
 	private defaultMode: ChatMode = "Agent";
+
+	constructor() {
+		this.restore();
+	}
+
+	private getStorage(): Storage | undefined {
+		try {
+			return typeof window !== "undefined" ? window.localStorage : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private persist(): void {
+		const storage = this.getStorage();
+		if (!storage) return;
+		const payload: PersistedChatState = {
+			sessions: this.sessions,
+			activeSessionId: this.activeSessionId,
+			defaultMode: this.defaultMode,
+		};
+		try {
+			storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+		} catch {
+			// Ignore storage failures and keep the in-memory session usable.
+		}
+	}
+
+	private restore(): void {
+		const storage = this.getStorage();
+		if (!storage) return;
+		try {
+			const raw = storage.getItem(STORAGE_KEY);
+			if (!raw) return;
+			const parsed = JSON.parse(raw) as Partial<PersistedChatState>;
+			this.sessions = Array.isArray(parsed.sessions)
+				? parsed.sessions.map((session) => ({
+						...session,
+						todos: Array.isArray(session.todos) ? session.todos : [],
+						transcript: Array.isArray(session.transcript) ? session.transcript : [],
+					}))
+				: [];
+			this.activeSessionId =
+				typeof parsed.activeSessionId === "string" || parsed.activeSessionId === null
+					? parsed.activeSessionId
+					: null;
+			this.defaultMode =
+				parsed.defaultMode === "Ask" || parsed.defaultMode === "Edit"
+					? parsed.defaultMode
+					: "Agent";
+		} catch {
+			this.sessions = [];
+			this.activeSessionId = null;
+			this.defaultMode = "Agent";
+		}
+	}
 
 	getSnapshots(): ChatSession[] {
 		return this.sessions.map(toSnapshot);
@@ -75,6 +142,7 @@ export class ChatSessionStore {
 
 	setDefaultMode(mode: ChatMode): void {
 		this.defaultMode = mode;
+		this.persist();
 	}
 
 	ensureSession(modelId: string | null): ChatSession {
@@ -90,10 +158,12 @@ export class ChatSessionStore {
 			modelId,
 			createdAt: Date.now(),
 			bootstrappedAt: Date.now(),
+			todos: [],
 			transcript: [createBootstrapEntry(mode)],
 		};
 		this.sessions.push(session);
 		this.activeSessionId = session.id;
+		this.persist();
 		return toSnapshot(session);
 	}
 
@@ -101,6 +171,7 @@ export class ChatSessionStore {
 		const exists = this.sessions.some((session) => session.id === sessionId);
 		if (!exists) return null;
 		this.activeSessionId = sessionId;
+		this.persist();
 		return this.getActiveSnapshot();
 	}
 
@@ -109,6 +180,7 @@ export class ChatSessionStore {
 		if (!session) return null;
 		session.mode = mode;
 		this.defaultMode = mode;
+		this.persist();
 		return toSnapshot(session);
 	}
 
@@ -116,6 +188,7 @@ export class ChatSessionStore {
 		const session = this.sessions.find((candidate) => candidate.id === sessionId);
 		if (!session) return null;
 		session.modelId = modelId;
+		this.persist();
 		return toSnapshot(session);
 	}
 
@@ -126,6 +199,7 @@ export class ChatSessionStore {
 		if (session.title === "New Chat" && entry.role === "user" && entry.visibility === "visible") {
 			session.title = deriveTitleFromContent(entry.content);
 		}
+		this.persist();
 		return toSnapshot(session);
 	}
 
@@ -139,7 +213,41 @@ export class ChatSessionStore {
 		const index = session.transcript.findIndex((entry) => entry.id === entryId);
 		if (index === -1) return null;
 		session.transcript[index] = updater(session.transcript[index]!);
+		this.persist();
 		return toSnapshot(session);
+	}
+
+	getSessionTodos(sessionId: string) {
+		const session = this.sessions.find((candidate) => candidate.id === sessionId);
+		return session?.todos.map((item) => ({ ...item })) ?? [];
+	}
+
+	updateSessionTodos(
+		sessionId: string,
+		items: Array<{
+			id: string;
+			content: string;
+			status: "pending" | "in_progress" | "completed" | "cancelled";
+		}>,
+		merge: boolean,
+	) {
+		const session = this.sessions.find((candidate) => candidate.id === sessionId);
+		if (!session) {
+			return [];
+		}
+		const current = session.todos ?? [];
+		const next = merge
+			? (() => {
+					const byId = new Map(current.map((item) => [item.id, item]));
+					for (const item of items) {
+						byId.set(item.id, item);
+					}
+					return [...byId.values()];
+				})()
+			: items.map((item) => ({ ...item }));
+		session.todos = next;
+		this.persist();
+		return session.todos.map((item) => ({ ...item }));
 	}
 }
 

@@ -1,9 +1,29 @@
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "./system-prompt";
+import type { ChatToolJsonSchema } from "./tools/tool-types";
 import type { AnthropicRequest } from "./types";
 
 export interface LMStudioChatMessage {
-	role: "system" | "user" | "assistant";
-	content: string;
+	role: "system" | "user" | "assistant" | "tool";
+	content: string | null;
+	tool_calls?: Array<{
+		id: string;
+		type: "function";
+		function: {
+			name: string;
+			arguments: string;
+		};
+	}>;
+	tool_call_id?: string;
+	name?: string;
+}
+
+export interface LMStudioNativeTool {
+	type: "function";
+	function: {
+		name: string;
+		description: string;
+		parameters: ChatToolJsonSchema;
+	};
 }
 
 export interface LMStudioChatCompletionRequest {
@@ -12,6 +32,8 @@ export interface LMStudioChatCompletionRequest {
 	stream: boolean;
 	temperature: number;
 	stop: string[];
+	tools?: LMStudioNativeTool[];
+	tool_choice?: "auto" | "none";
 }
 
 function flattenBlocks(
@@ -25,15 +47,21 @@ function flattenBlocks(
 }
 
 function stripSentinels(text: string): string {
-	return text.replaceAll(SYSTEM_PROMPT_DYNAMIC_BOUNDARY, "").trim();
+	return text.split(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).join("").trim();
 }
 
 function mergeConsecutiveSameRole(messages: LMStudioChatMessage[]): LMStudioChatMessage[] {
 	const merged: LMStudioChatMessage[] = [];
 	for (const msg of messages) {
 		const prev = merged.at(-1);
-		if (prev && prev.role === msg.role) {
-			prev.content += `\n\n${msg.content}`;
+		if (
+			prev &&
+			prev.role === msg.role &&
+			!prev.tool_calls &&
+			!msg.tool_calls &&
+			prev.role !== "tool"
+		) {
+			prev.content = `${prev.content ?? ""}\n\n${msg.content ?? ""}`;
 		} else {
 			merged.push({ ...msg });
 		}
@@ -52,7 +80,10 @@ export function toLMStudioMessages(request: AnthropicRequest): LMStudioChatMessa
 
 	const conversationMessages = request.messages.map((message) => ({
 		role: message.role as LMStudioChatMessage["role"],
-		content: flattenBlocks(message.content),
+		content: message.content ? flattenBlocks(message.content) : null,
+		tool_calls: message.tool_calls,
+		tool_call_id: message.tool_call_id,
+		name: message.name,
 	}));
 
 	return mergeConsecutiveSameRole([...systemMessages, ...conversationMessages]);
@@ -74,6 +105,8 @@ export function buildLMStudioChatCompletionRequest(
 		stream: request.stream,
 		temperature: 0.7,
 		stop: STOP_SEQUENCES_BY_FORMAT[request.format] ?? [],
+		tools: request.tools,
+		tool_choice: request.tool_choice,
 	};
 }
 

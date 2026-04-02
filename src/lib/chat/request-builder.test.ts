@@ -4,6 +4,48 @@ import { buildQueryContext } from "@/lib/chat/query-context";
 import { buildAnthropicRequest } from "@/lib/chat/request-builder";
 import { createTranscriptEntry } from "@/lib/chat/session-store";
 import type { ChatSessionState } from "@/lib/chat/types";
+import type { ChatToolContext } from "@/lib/chat/tools/tool-types";
+
+const fakeToolContext: ChatToolContext = {
+	sessionId: "tool-session",
+	modelId: "openai/gpt-oss-20b",
+	workspaceRoots: ["/workspace"],
+	signal: new AbortController().signal,
+	stopGeneration: () => {},
+	setMode: () => {},
+	readFile: async () => ({
+		content: "",
+		filePath: "/workspace/file.txt",
+		startLine: 1,
+		endLine: 0,
+		totalLines: 0,
+		isPartial: false,
+		truncated: false,
+		fileType: "text",
+	}),
+	writeFile: async () => ({ action: "overwritten" }),
+	editFile: async () => ({ content: "", replacements: 0, action: "edited" }),
+	writeNotebookCell: async () => ({
+		serializedNotebook: "",
+		editMode: "replace",
+	}),
+	glob: async () => ({ items: [], truncated: false }),
+	grep: async () => ({ mode: "files_with_matches", output: "", files: [], truncated: false, counts: [] }),
+	runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0, cwd: "/workspace" }),
+	stopTask: async (taskId) => ({ taskId, status: "stopped" }),
+	fetchUrl: async ({ url }) => ({
+		url,
+		status: 200,
+		contentType: "text/plain",
+		bytes: 0,
+		content: "",
+		result: "",
+	}),
+	searchWeb: async () => [],
+	listTools: () => [],
+	getTodos: () => [],
+	setTodos: (items) => items,
+};
 
 describe("request builder", () => {
 	it("derives API-safe history from the canonical transcript", () => {
@@ -154,5 +196,45 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("# Runtime Context");
 		expect(request.system.join("\n")).toContain("# User Context");
 		expect(request.system.join("\n")).not.toContain("<system-context>");
+	});
+
+	it("attaches native tool definitions for supported models", () => {
+		const session: ChatSessionState = {
+			id: "session-openai-tools",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "openai/gpt-oss-20b",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Read a file",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "openai/gpt-oss-20b",
+			modelName: "GPT OSS 20B",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.nativeToolCalling).toBe(true);
+		expect(request.tools?.some((tool) => tool.function.name === "Read")).toBe(true);
+		const bashTool = request.tools?.find((tool) => tool.function.name === "Bash");
+		expect(bashTool?.function.parameters.properties?.timeout?.type).toBe("integer");
+		expect(bashTool?.function.parameters.properties?.run_in_background?.type).toBe("boolean");
+		expect(bashTool?.function.parameters.properties?.working_directory?.type).toBe("string");
+		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 });

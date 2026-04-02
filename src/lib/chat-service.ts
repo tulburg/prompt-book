@@ -1,6 +1,10 @@
 import { buildQueryContext } from "./chat/query-context";
 import { createTranscriptEntry, ChatSessionStore } from "./chat/session-store";
 import { buildAnthropicRequest } from "./chat/request-builder";
+import { resolveChatModelProfile } from "./chat/model-profiles";
+import { executeToolCalls } from "./chat/tools/tool-orchestration";
+import { createToolContext } from "./chat/tools/tool-runtime";
+import type { JsonObject } from "./chat/tools/tool-types";
 import { LlamaChatAdapter } from "./chat/transports/llama-adapter";
 import type {
 	ChatMessage,
@@ -156,51 +160,63 @@ export class ChatService {
 		});
 		session = this.commitEntry(session.id, userMessage) ?? session;
 
-		this._abortController = new AbortController();
+		const abortController = new AbortController();
+		this._abortController = abortController;
 		this._streamingSessionId = session.id;
 		this._onDidStreamEvent.fire({
 			type: "stream_request_start",
 			sessionId: session.id,
 		});
-		let assistantContent = "";
 
 		try {
-			const queryContext = buildQueryContext({ session });
-			const request = buildAnthropicRequest({
-				session,
-				queryContext,
-				model: resolvedModel,
-				modelName: this._currentModel?.displayName,
-			});
-
-			for await (const event of this.transport.stream(request, {
-				serverUrl: options?.serverUrl,
-				signal: this._abortController.signal,
-			})) {
-				if (event.type === "content_delta") {
-					assistantContent += event.text;
-				}
-				this._onDidStreamEvent.fire({
-					type: "stream_event",
-					sessionId: session.id,
-					event,
+			for (let iteration = 0; iteration < 8; iteration++) {
+				let assistantContent = "";
+				let assistantToolCalls: Array<{
+					id: string;
+					name: string;
+					input: JsonObject;
+				}> = [];
+				const profile = resolveChatModelProfile({
+					modelId: resolvedModel,
+					modelName: this._currentModel?.displayName,
 				});
-			}
+				const toolContext =
+					profile.nativeToolCalling === "supported"
+						? await createToolContext({
+								sessionId: session.id,
+								modelId: resolvedModel,
+								signal: abortController.signal,
+								stopGeneration: () => this.stopGeneration(),
+								setMode: (mode) => this.setMode(mode),
+								getTodos: () => this.store.getSessionTodos(session.id),
+								setTodos: (items, merge) => this.updateSessionTodos(session.id, items, merge),
+							})
+						: undefined;
+				const queryContext = buildQueryContext({ session });
+				const request = buildAnthropicRequest({
+					session,
+					queryContext,
+					model: resolvedModel,
+					modelName: this._currentModel?.displayName,
+					toolContext,
+				});
 
-			if (assistantContent) {
-				this.commitEntry(
-					session.id,
-					createTranscriptEntry({
-						role: "assistant",
-						content: assistantContent,
-						visibility: "visible",
-						includeInHistory: true,
-						subtype: "message",
-					}),
-				);
-			}
-		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
+				for await (const event of this.transport.stream(request, {
+					serverUrl: options?.serverUrl,
+					signal: abortController.signal,
+				})) {
+					if (event.type === "content_delta") {
+						assistantContent += event.text;
+					} else if (event.type === "tool_calls") {
+						assistantToolCalls = event.calls;
+					}
+					this._onDidStreamEvent.fire({
+						type: "stream_event",
+						sessionId: session.id,
+						event,
+					});
+				}
+
 				if (assistantContent) {
 					this.commitEntry(
 						session.id,
@@ -213,6 +229,56 @@ export class ChatService {
 						}),
 					);
 				}
+
+				if (assistantToolCalls.length === 0) {
+					break;
+				}
+				if (!toolContext) {
+					throw new Error("Received tool calls for a model without native tool support.");
+				}
+
+				const executed = await executeToolCalls(assistantToolCalls, toolContext);
+				for (const item of executed) {
+					this.commitEntry(
+						session.id,
+						createTranscriptEntry({
+							role: "assistant",
+							content: `${item.call.name}(${JSON.stringify(item.call.input)})`,
+							visibility: "visible",
+							includeInHistory: true,
+							subtype: "tool_use",
+							toolInvocation: {
+								toolCallId: item.call.id,
+								toolName: item.call.name,
+								input: item.call.input as JsonObject,
+							},
+						}),
+					);
+					this.commitEntry(
+						session.id,
+						createTranscriptEntry({
+							role: "tool",
+							content: item.result.content,
+							visibility: "visible",
+							includeInHistory: true,
+							subtype: "tool_result",
+							toolResult: {
+								toolCallId: item.call.id,
+								toolName: item.call.name,
+								input: item.call.input as JsonObject,
+								outputText: item.result.content,
+								display: item.result.display,
+								isError: item.result.isError,
+								structuredContent: item.result.structuredContent,
+							},
+						}),
+					);
+				}
+
+				session = this.store.getSnapshot(session.id) ?? session;
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
 				this.commitEntry(
 					session.id,
 					createTranscriptEntry({
@@ -225,18 +291,6 @@ export class ChatService {
 					}),
 				);
 			} else {
-				if (assistantContent) {
-					this.commitEntry(
-						session.id,
-						createTranscriptEntry({
-							role: "assistant",
-							content: assistantContent,
-							visibility: "visible",
-							includeInHistory: true,
-							subtype: "message",
-						}),
-					);
-				}
 				this.commitEntry(
 					session.id,
 					createTranscriptEntry({
@@ -249,7 +303,9 @@ export class ChatService {
 				);
 			}
 		} finally {
-			this._abortController = null;
+			if (this._abortController === abortController) {
+				this._abortController = null;
+			}
 			this._streamingSessionId = null;
 		}
 	}
@@ -314,7 +370,26 @@ export class ChatService {
 			timestamp: entry.timestamp,
 			isStreaming: entry.isStreaming,
 			subtype: entry.subtype,
+			toolInvocation: entry.toolInvocation,
+			toolResult: entry.toolResult,
 		};
+	}
+
+	private updateSessionTodos(
+		sessionId: string,
+		items: Array<{
+			id: string;
+			content: string;
+			status: "pending" | "in_progress" | "completed" | "cancelled";
+		}>,
+		merge: boolean,
+	) {
+		const next = this.store.updateSessionTodos(sessionId, items, merge);
+		const snapshot = this.store.getSnapshot(sessionId);
+		if (snapshot) {
+			this._onDidUpdateSession.fire(snapshot);
+		}
+		return next;
 	}
 }
 

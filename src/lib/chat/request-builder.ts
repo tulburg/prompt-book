@@ -1,6 +1,10 @@
 import { resolveChatModelProfile, type ChatModelProfile } from "./model-profiles";
 import { normalizeMessagesForAnthropic } from "./normalize-messages";
-import type { AnthropicMessage, AnthropicRequest, ChatQueryContext, ChatSessionState } from "./types";
+import type { AnthropicRequest, ChatApiMessage, ChatQueryContext, ChatSessionState } from "./types";
+import { buildToolInstructionSections } from "./tools/tool-instructions";
+import { getAvailableChatTools, getNativeToolDefinitions } from "./tools/tool-registry";
+import { supportsNativeToolCalling } from "./tools/tool-capabilities";
+import type { ChatToolContext } from "./tools/tool-types";
 
 function serializeContext(
 	tagName: "system-reminder" | "system-context",
@@ -14,9 +18,9 @@ function serializeContext(
 }
 
 export function prependUserContext(
-	messages: AnthropicMessage[],
+	messages: ChatApiMessage[],
 	userContext: Record<string, string>,
-): AnthropicMessage[] {
+): ChatApiMessage[] {
 	const serialized = serializeContext("system-reminder", userContext);
 	if (!serialized) return messages;
 
@@ -75,7 +79,13 @@ function collapseSystemSections(
 function buildSystemSections(
 	profile: ChatModelProfile,
 	queryContext: ChatQueryContext,
+	toolContext?: ChatToolContext,
 ): string[] {
+	const availableTools = toolContext ? getAvailableChatTools(toolContext) : [];
+	const toolSections =
+		profile.insertToolGuidance || (toolContext && supportsNativeToolCalling(profile))
+			? buildToolInstructionSections(availableTools)
+			: [];
 	const sections =
 		profile.contextStyle === "plain_sections"
 			? appendPlainContext(
@@ -84,17 +94,18 @@ function buildSystemSections(
 					queryContext.userContext,
 				)
 			: appendSystemContext(queryContext.systemPrompt, queryContext.systemContext);
+	const combined = [...sections, ...toolSections];
 
 	return profile.collapseSystemSections
-		? collapseSystemSections(sections, profile.systemSeparator)
-		: sections;
+		? collapseSystemSections(combined, profile.systemSeparator)
+		: combined;
 }
 
 function buildRequestMessages(
 	profile: ChatModelProfile,
-	normalizedMessages: AnthropicMessage[],
+	normalizedMessages: ChatApiMessage[],
 	queryContext: ChatQueryContext,
-): AnthropicMessage[] {
+): ChatApiMessage[] {
 	return profile.injectUserContext
 		? prependUserContext(normalizedMessages, queryContext.userContext)
 		: normalizedMessages;
@@ -105,19 +116,23 @@ export function buildAnthropicRequest({
 	queryContext,
 	model,
 	modelName,
+	toolContext,
 }: {
 	session: ChatSessionState;
 	queryContext: ChatQueryContext;
 	model: string;
 	modelName?: string | null;
+	toolContext?: ChatToolContext;
 }): AnthropicRequest {
 	const normalizedMessages = normalizeMessagesForAnthropic(session.transcript);
 	const profile = resolveChatModelProfile({ modelId: model, modelName });
-	console.log("[RequestBuilder] resolved profile:", { modelId: model, modelName, profileId: profile.id, contextStyle: profile.contextStyle, injectUserContext: profile.injectUserContext });
+	const nativeToolCalling = Boolean(toolContext) && supportsNativeToolCalling(profile);
+	const tools = toolContext && nativeToolCalling ? getNativeToolDefinitions(toolContext) : undefined;
+	console.log("[RequestBuilder] resolved profile:", { modelId: model, modelName, profileId: profile.id, contextStyle: profile.contextStyle, injectUserContext: profile.injectUserContext, nativeToolCalling, toolCount: tools?.length ?? 0 });
 
 	return {
 		model,
-		system: buildSystemSections(profile, queryContext),
+		system: buildSystemSections(profile, queryContext, toolContext),
 		messages: buildRequestMessages(profile, normalizedMessages, queryContext),
 		stream: true,
 		format:
@@ -126,6 +141,9 @@ export function buildAnthropicRequest({
 				: profile.id === "openai" || profile.id === "qwen" || profile.id === "gemma"
 					? profile.id
 					: "anthropic",
+		tools,
+		tool_choice: tools && tools.length > 0 ? "auto" : "none",
+		nativeToolCalling,
 		metadata: {
 			sessionId: session.id,
 			mode: session.mode,

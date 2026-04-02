@@ -1,0 +1,367 @@
+import { ipcMain } from "electron";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { mkdirSync, createWriteStream } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+function execFileAsync(
+	command: string,
+	args: string[],
+	options?: { cwd?: string; timeout?: number; shell?: boolean },
+): Promise<{ stdout: string; stderr: string }> {
+	return new Promise((resolve, reject) => {
+		execFile(
+			command,
+			args,
+			{
+				cwd: options?.cwd,
+				timeout: options?.timeout,
+				shell: options?.shell,
+				maxBuffer: 10 * 1024 * 1024,
+			},
+			(error, stdout, stderr) => {
+				if (error) {
+					const enriched = Object.assign(error, { stdout, stderr });
+					reject(enriched);
+					return;
+				}
+				resolve({ stdout, stderr });
+			},
+		);
+	});
+}
+
+function parseLines(output: string): string[] {
+	return output
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+}
+
+function isWithinRoots(targetPath: string, workspaceRoots: string[]): boolean {
+	if (workspaceRoots.length === 0) return true;
+	const absoluteTarget = path.resolve(targetPath);
+	return workspaceRoots.some((root) => {
+		const absoluteRoot = path.resolve(root);
+		return absoluteTarget === absoluteRoot || absoluteTarget.startsWith(`${absoluteRoot}${path.sep}`);
+	});
+}
+
+function resolveWorkspacePath(requestedPath: string | undefined, workspaceRoots: string[]): string {
+	const candidate = path.resolve(requestedPath || workspaceRoots[0] || process.cwd());
+	if (!isWithinRoots(candidate, workspaceRoots)) {
+		throw new Error("Tool path must stay within the open workspace roots.");
+	}
+	return candidate;
+}
+
+function applyWindow<T>(
+	items: T[],
+	headLimit: number | undefined,
+	offset: number | undefined,
+	defaultLimit: number,
+): {
+	items: T[];
+	truncated: boolean;
+	appliedLimit?: number;
+	appliedOffset?: number;
+} {
+	const start = Math.max(0, offset ?? 0);
+	if (headLimit === 0) {
+		return {
+			items: items.slice(start),
+			truncated: false,
+			appliedOffset: start > 0 ? start : undefined,
+		};
+	}
+	const effectiveLimit = headLimit ?? defaultLimit;
+	const sliced = items.slice(start, start + effectiveLimit);
+	const truncated = items.length - start > effectiveLimit;
+	return {
+		items: sliced,
+		truncated,
+		appliedLimit: truncated ? effectiveLimit : undefined,
+		appliedOffset: start > 0 ? start : undefined,
+	};
+}
+
+function toAbsoluteResultPath(searchPath: string, filePath: string): string {
+	return path.isAbsolute(filePath) ? filePath : path.join(searchPath, filePath);
+}
+
+function parseCountEntries(output: string, searchPath: string): Array<{ path: string; count: number }> {
+	return parseLines(output)
+		.map((line) => {
+			const separatorIndex = line.lastIndexOf(":");
+			if (separatorIndex <= 0) return null;
+			const filePath = line.slice(0, separatorIndex);
+			const count = Number.parseInt(line.slice(separatorIndex + 1), 10);
+			if (!Number.isFinite(count)) return null;
+			return {
+				path: toAbsoluteResultPath(searchPath, filePath),
+				count,
+			};
+		})
+		.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+}
+
+function getBackgroundTaskDir(): string {
+	const dir = path.join(os.tmpdir(), "prompt-book-chat-tools");
+	mkdirSync(dir, { recursive: true });
+	return dir;
+}
+
+function createTaskId(): string {
+	return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const backgroundTasks = new Map<
+	string,
+	{
+		child: ChildProcess;
+		command: string;
+		cwd: string;
+		outputPath: string;
+	}
+>();
+
+export function registerChatToolHandlers() {
+	ipcMain.handle("chat-tools:glob", async (_event, payload: {
+		pattern: string;
+		root?: string;
+		headLimit?: number;
+		offset?: number;
+		workspaceRoots?: string[];
+	}) => {
+		const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+		const root = resolveWorkspacePath(payload.root, workspaceRoots);
+		const { stdout } = await execFileAsync("rg", ["--files", root, "--glob", payload.pattern]);
+		const items = parseLines(stdout).map((filePath) => toAbsoluteResultPath(root, filePath));
+		const window = applyWindow(items, payload.headLimit, payload.offset, 200);
+		return {
+			items: window.items,
+			truncated: window.truncated,
+		};
+	});
+
+	ipcMain.handle("chat-tools:grep", async (_event, payload: Record<string, unknown>) => {
+		const args: string[] = [];
+		const outputMode =
+			payload.output_mode === "content" || payload.output_mode === "count"
+				? payload.output_mode
+				: "files_with_matches";
+
+		// Search hidden files and exclude VCS directories
+		args.push("--hidden");
+		for (const vcsDir of [".git", ".svn", ".hg", ".bzr", ".jj", ".sl"]) {
+			args.push("--glob", `!${vcsDir}`);
+		}
+
+		// Truncate very long lines to avoid huge output
+		args.push("--max-columns", "500");
+
+		// Handle glob patterns — split on commas for multi-glob support
+		if (payload.glob && typeof payload.glob === "string") {
+			const globs = payload.glob.split(",").map((g) => g.trim()).filter(Boolean);
+			for (const g of globs) {
+				args.push("--glob", g);
+			}
+		}
+		if (payload.type && typeof payload.type === "string") {
+			args.push("--type", payload.type);
+		}
+		if (payload["-i"] === true) {
+			args.push("-i");
+		}
+		if (payload.multiline === true) {
+			args.push("-U", "--multiline-dotall");
+		}
+		for (const flag of ["-A", "-B", "-C"] as const) {
+			if (typeof payload[flag] === "number") {
+				args.push(flag, String(payload[flag]));
+			}
+		}
+		if (outputMode === "files_with_matches") {
+			args.push("-l");
+		} else if (outputMode === "count") {
+			args.push("-c");
+		} else {
+			if (payload["-n"] !== false) {
+				args.push("-n");
+			}
+		}
+		const pattern = typeof payload.pattern === "string" ? payload.pattern : "";
+		const workspaceRoots = Array.isArray(payload.workspaceRoots)
+			? payload.workspaceRoots.filter((value): value is string => typeof value === "string")
+			: [];
+		const searchPath = resolveWorkspacePath(
+			typeof payload.path === "string" ? payload.path : undefined,
+			workspaceRoots,
+		);
+
+		// Use -e for patterns that start with a dash to prevent rg misinterpreting them
+		if (pattern.startsWith("-")) {
+			args.push("-e", pattern, searchPath);
+		} else {
+			args.push(pattern, searchPath);
+		}
+		try {
+			const { stdout } = await execFileAsync("rg", args);
+			if (outputMode === "files_with_matches") {
+				const allFiles = parseLines(stdout).map((filePath) => toAbsoluteResultPath(searchPath, filePath));
+				const window = applyWindow(
+					allFiles,
+					typeof payload.head_limit === "number" ? payload.head_limit : undefined,
+					typeof payload.offset === "number" ? payload.offset : undefined,
+					250,
+				);
+				return {
+					mode: outputMode,
+					output: window.items.join("\n"),
+					files: window.items,
+					truncated: window.truncated,
+					appliedLimit: window.appliedLimit,
+					appliedOffset: window.appliedOffset,
+					counts: [],
+				};
+			}
+			if (outputMode === "count") {
+				const allCounts = parseCountEntries(stdout, searchPath);
+				const window = applyWindow(
+					allCounts,
+					typeof payload.head_limit === "number" ? payload.head_limit : undefined,
+					typeof payload.offset === "number" ? payload.offset : undefined,
+					250,
+				);
+				return {
+					mode: outputMode,
+					output: window.items.map((entry) => `${entry.path}: ${entry.count}`).join("\n"),
+					files: window.items.map((entry) => entry.path),
+					truncated: window.truncated,
+					appliedLimit: window.appliedLimit,
+					appliedOffset: window.appliedOffset,
+					counts: window.items,
+				};
+			}
+			const lines = stdout.replace(/\r\n/g, "\n").split("\n").filter((line) => line.length > 0);
+			const window = applyWindow(
+				lines,
+				typeof payload.head_limit === "number" ? payload.head_limit : undefined,
+				typeof payload.offset === "number" ? payload.offset : undefined,
+				250,
+			);
+			return {
+				mode: outputMode,
+				output: window.items.join("\n"),
+				files: [],
+				truncated: window.truncated,
+				appliedLimit: window.appliedLimit,
+				appliedOffset: window.appliedOffset,
+				counts: [],
+			};
+		} catch (error) {
+			const stdout = typeof (error as { stdout?: string }).stdout === "string" ? (error as { stdout: string }).stdout : "";
+			const stderr = typeof (error as { stderr?: string }).stderr === "string" ? (error as { stderr: string }).stderr : "";
+			// ripgrep exits 1 on no matches
+			if (/code 1|status 1/i.test(String(error))) {
+				return { mode: outputMode, output: stdout.trim(), files: [], truncated: false, counts: [] };
+			}
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error("ripgrep (rg) is not installed or not available on PATH.");
+			}
+			if (/permission denied/i.test(stderr)) {
+				throw new Error(`ripgrep could not access part of the search path: ${stderr}`);
+			}
+			throw new Error(stderr || String(error));
+		}
+	});
+
+	ipcMain.handle(
+		"chat-tools:run-command",
+		async (
+			_event,
+			payload: {
+				command: string;
+				cwd?: string;
+				timeoutMs?: number;
+				runInBackground?: boolean;
+				description?: string;
+			},
+		) => {
+			const cwd = payload.cwd || process.cwd();
+			if (payload.runInBackground) {
+				const taskId = createTaskId();
+				const outputPath = path.join(getBackgroundTaskDir(), `${taskId}.log`);
+				const child = spawn(
+					process.platform === "win32" ? "cmd.exe" : "bash",
+					process.platform === "win32"
+						? ["/d", "/s", "/c", payload.command]
+						: ["-lc", payload.command],
+					{
+						cwd,
+						detached: false,
+						stdio: ["ignore", "pipe", "pipe"],
+					},
+				);
+				const stream = createWriteStream(outputPath, { flags: "a" });
+				child.stdout?.pipe(stream);
+				child.stderr?.pipe(stream);
+				child.on("close", () => {
+					backgroundTasks.delete(taskId);
+					stream.end();
+				});
+				backgroundTasks.set(taskId, {
+					child,
+					command: payload.command,
+					cwd,
+					outputPath,
+				});
+				return {
+					stdout: "",
+					stderr: "",
+					exitCode: null,
+					cwd,
+					status: "running" as const,
+					backgroundTaskId: taskId,
+					outputPath,
+				};
+			}
+			try {
+				const { stdout, stderr } = await execFileAsync(
+					process.platform === "win32" ? "cmd.exe" : "bash",
+					process.platform === "win32"
+						? ["/d", "/s", "/c", payload.command]
+						: ["-lc", payload.command],
+					{ cwd, timeout: payload.timeoutMs ?? 30_000 },
+				);
+				return { stdout, stderr, exitCode: 0, cwd, status: "completed" as const };
+			} catch (error) {
+				const stdout = typeof (error as { stdout?: string }).stdout === "string" ? (error as { stdout: string }).stdout : "";
+				const stderr = typeof (error as { stderr?: string }).stderr === "string" ? (error as { stderr: string }).stderr : String(error);
+				const exitCode =
+					typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : 1;
+				return { stdout, stderr, exitCode, cwd, status: "completed" as const };
+			}
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:stop-task",
+		async (_event, payload: { taskId?: string }) => {
+			const taskId = payload.taskId;
+			if (!taskId) {
+				throw new Error("Missing required parameter: taskId");
+			}
+			const task = backgroundTasks.get(taskId);
+			if (!task) {
+				throw new Error(`No running task found with ID: ${taskId}`);
+			}
+			task.child.kill();
+			backgroundTasks.delete(taskId);
+			return {
+				taskId,
+				command: task.command,
+			};
+		},
+	);
+}

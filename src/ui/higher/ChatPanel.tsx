@@ -15,6 +15,7 @@ import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-serv
 import type { PullProgressEvent } from "@/lib/model-downloads";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/server-service";
+import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 import {
 	fetchModelCatalog,
 	LMS_MODEL_CATALOG_FALLBACK,
@@ -320,12 +321,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							{session.title}
 						</button>
 					))}
-					<button
-						className="cursor-pointer whitespace-nowrap border-b-2 border-foreground bg-transparent px-3 py-1.5 text-xs font-semibold text-foreground"
-						onClick={handleNewChat}
-					>
-						New Chat
-					</button>
 				</div>
 				<div className="flex shrink-0 items-center gap-0.5 px-1">
 					<button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground" onClick={handleNewChat}>
@@ -524,9 +519,21 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					</div>
 				) : (
 					<div className="mx-auto flex max-w-[950px] flex-col">
-						{messages.map((msg) => (
-							<ChatMessageItem key={msg.id} message={msg} />
-						))}
+						{messages.map((msg, idx) => {
+							if (msg.subtype === "tool_result") {
+								const prev = messages[idx - 1];
+								if (prev?.subtype === "tool_use" && prev.toolInvocation?.toolCallId === msg.toolResult?.toolCallId) {
+									return null;
+								}
+							}
+							if (msg.subtype === "tool_use") {
+								const next = messages[idx + 1];
+								if (next?.subtype === "tool_result" && next.toolResult?.toolCallId === msg.toolInvocation?.toolCallId) {
+									return <ChatMessageItem key={msg.id} message={msg} pairedResult={next} />;
+								}
+							}
+							return <ChatMessageItem key={msg.id} message={msg} />;
+						})}
 						{isStreaming && (
 							<ChatMessageItem
 								message={{
@@ -650,21 +657,24 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 }
 
-function ChatMessageItem({ message }: { message: ChatMessage }) {
+function ChatMessageItem({ message, pairedResult }: { message: ChatMessage; pairedResult?: ChatMessage }) {
 	const isUser = message.role === "user";
 	const isNotice = message.role === "system" || message.subtype === "error" || message.subtype === "interruption";
+	const isToolMessage = message.subtype === "tool_use" || message.subtype === "tool_result";
 
 	return (
 		<div className={`flex cursor-default select-text flex-col px-4 py-1.5 ${isUser ? "items-end" : ""}`}>
-			{!isUser && (
+			{!isUser && !isToolMessage && (
 				<div className="mb-1 flex items-center gap-2">
 					<div className="flex size-6 items-center justify-center rounded-full bg-border-500">
 						<span className="text-sm text-sky">&#10022;</span>
 					</div>
 				</div>
 			)}
-			<div className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : ""}`}>
-				{message.isStreaming && !message.content ? (
+			<div className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "" : ""}`}>
+				{isToolMessage ? (
+					<ToolMessageRenderer message={message} pairedResult={pairedResult} />
+				) : message.isStreaming && !message.content ? (
 					<div className="flex gap-1 py-1">
 						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite] rounded-full bg-placeholder" />
 						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite_0.2s] rounded-full bg-placeholder" />

@@ -33,6 +33,9 @@ export function handleChatStreamEvent(
 			callbacks.onStreamingText?.((text) => (text ?? "") + deltaText);
 			return;
 		}
+		case "tool_calls":
+			callbacks.onSetStreamMode("responding");
+			return;
 		default:
 			return;
 	}

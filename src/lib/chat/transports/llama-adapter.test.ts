@@ -148,4 +148,65 @@ describe("llama adapter streaming", () => {
 
 		expect(events).toEqual(["@".repeat(40)]);
 	});
+
+	it("parses streamed tool calls", async () => {
+		const encoder = new TextEncoder();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								encoder.encode(
+									[
+										'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"StructuredOutput","arguments":"{\\"status\\":\\""}}]}}]}\n\n',
+										'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ok\\"}"}}]}}]}\n\n',
+									].join(""),
+								),
+							);
+							controller.close();
+						},
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "text/event-stream" },
+					},
+				),
+			),
+		);
+
+		const adapter = new LlamaChatAdapter();
+		const toolEvents: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+		for await (const event of adapter.stream(
+			{
+				model: "openai/gpt-oss-20b",
+				system: [],
+				messages: [],
+				stream: true,
+				format: "openai",
+				nativeToolCalling: true,
+				tools: [],
+				tool_choice: "auto",
+				metadata: {
+					sessionId: "session-1",
+					mode: "Agent",
+					provider: "llama",
+				},
+			},
+			{ signal: new AbortController().signal },
+		)) {
+			if (event.type === "tool_calls") {
+				toolEvents.push(...event.calls);
+			}
+		}
+
+		expect(toolEvents).toEqual([
+			{
+				id: "call_1",
+				name: "StructuredOutput",
+				input: { status: "ok" },
+			},
+		]);
+	});
 });
