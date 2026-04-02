@@ -6,11 +6,17 @@ import type { ProjectBridge } from "@/lib/project-files";
 
 declare global {
 	interface Window {
-		ipcRenderer?: {
+		ipcRenderer: {
 			on: (
 				channel: string,
 				listener: (event: unknown, ...args: unknown[]) => void,
 			) => unknown;
+			off: (
+				channel: string,
+				listener: (...args: unknown[]) => void,
+			) => unknown;
+			send: (channel: string, ...args: unknown[]) => void;
+			invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
 		};
 		MonacoEnvironment?: {
 			getWorker: (workerId: string, label: string) => Worker;
@@ -18,5 +24,13 @@ declare global {
 		nativeContextMenu?: NativeContextMenuBridge;
 		projectBridge?: ProjectBridge;
 		settingsBridge?: SettingsBridge;
+		lmsBridge?: {
+			isBinaryInstalled: () => Promise<boolean>;
+			downloadBinary: () => Promise<void>;
+			downloadModel: (modelId: string) => Promise<void>;
+			onDownloadProgress: (listener: (data: { modelId: string; message: string }) => void) => () => void;
+			startServer: (serverUrl: string) => Promise<void>;
+			stopServer: () => Promise<void>;
+		};
 	}
 }

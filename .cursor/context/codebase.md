@@ -17,6 +17,12 @@ App Entry Points:
 
 Desktop Runtime:
 - Electron window creation, persisted window state, and app lifecycle start in - `electron/main.ts`
+- IPC handler registration and shared types/utilities start in - `electron/handlers/index.ts`, `electron/handlers/shared.ts`
+- Project filesystem handlers (open, read, write, create, delete, move, copy, rename) start in - `electron/handlers/project-handlers.ts`
+- Application settings handlers start in - `electron/handlers/settings-handlers.ts`
+- Git status handlers start in - `electron/handlers/git-handlers.ts`
+- Native context menu handlers start in - `electron/handlers/ui-handlers.ts`
+- LMS / llama.cpp server handlers start in - `electron/handlers/lms-handlers.ts`
 - Renderer IPC bridge exposed to `window.ipcRenderer` starts in - `electron/preload.ts`
 - Desktop packaging defaults and build flow start in - `electron-builder.json`, `package.json`, `scripts/build-desktop.ts`
 

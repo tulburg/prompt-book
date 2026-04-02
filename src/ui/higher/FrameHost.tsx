@@ -43,7 +43,7 @@ export function FrameHost({
       elements.push(
         <Separator
           key={`separator-${panels[i].id}`}
-          className="resize-handle"
+          className="resize-handle w-0.5 min-w-0.5 cursor-col-resize border-x border-transparent bg-transparent transition-colors duration-150 focus-visible:outline-none my-auto h-[96%]"
         />,
       );
     }

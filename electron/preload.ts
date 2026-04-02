@@ -67,3 +67,16 @@ contextBridge.exposeInMainWorld("nativeContextMenu", {
   showMenu: (request: NativeContextMenuRequest) =>
     ipcRenderer.invoke("ui:show-native-context-menu", request),
 })
+
+contextBridge.exposeInMainWorld("lmsBridge", {
+  isBinaryInstalled: () => ipcRenderer.invoke("lms:is-binary-installed"),
+  downloadBinary: () => ipcRenderer.invoke("lms:download-binary"),
+  downloadModel: (modelId: string) => ipcRenderer.invoke("lms:download-model", modelId),
+  onDownloadProgress: (listener: (data: { modelId: string; message: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { modelId: string; message: string }) => listener(data)
+    ipcRenderer.on("lms:download-progress", handler)
+    return () => { ipcRenderer.off("lms:download-progress", handler) }
+  },
+  startServer: (serverUrl: string) => ipcRenderer.invoke("lms:start-server", serverUrl),
+  stopServer: () => ipcRenderer.invoke("lms:stop-server"),
+})

@@ -1,4 +1,5 @@
 export * from "./higher/Canvas";
+export * from "./higher/ChatPanel";
 export * from "./higher/ExplorerPanel";
 export * from "./higher/FrameHost";
 export * from "./higher/Settings";

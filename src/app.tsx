@@ -6,7 +6,7 @@ import { useGitStatus } from "@/lib/use-git-status";
 import { useApplicationSettings } from "@/lib/use-application-settings";
 import { useProjectManager } from "@/lib/use-project-manager";
 import type { ProjectNode } from "@/lib/project-files";
-import { ExplorerPanel, FrameHost, Header, PromptEditor, Sidebar } from "@/ui";
+import { ChatPanel, FrameHost, Header, PromptEditor, Sidebar } from "@/ui";
 import * as React from "react";
 
 export default function App() {
@@ -211,23 +211,14 @@ export default function App() {
 							/>
 						),
 					},
-					{
-						id: "explorer",
-						minSize: 100,
-						defaultSize: 15,
-						children: (
-							<ExplorerPanel
-								isBusy={projectManager.isBusy}
-								onBeginCreate={projectManager.beginCreate}
-								onBeginRename={projectManager.beginRename}
-								onDeleteNode={projectManager.deleteNode}
-								onOpenProjectFolder={projectManager.openProjectFolder}
-								onRefresh={() => projectManager.refreshProject()}
-								project={projectManager.project}
-								selectedNode={projectManager.selectedNode}
-							/>
-						),
-					},
+				{
+					id: "chat",
+					minSize: 200,
+					defaultSize: 25,
+					children: (
+						<ChatPanel />
+					),
+				},
 				]}
 			/>
 		</div>
