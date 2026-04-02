@@ -9,14 +9,17 @@ import {
 	Loader2,
 	Download,
 	AlertCircle,
+	Square,
 } from "lucide-react";
 import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-service";
+import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/server-service";
 import {
 	fetchModelCatalog,
 	LMS_MODEL_CATALOG_FALLBACK,
 	type LMSModelEntry,
 } from "@/lib/model-catalog";
+import type { ChatMode } from "@/lib/chat/types";
 
 interface ChatPanelProps {
 	className?: string;
@@ -32,10 +35,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [serverStatus, setServerStatus] = React.useState<"stopped" | "starting" | "running" | "error">("stopped");
 	const [showModelPicker, setShowModelPicker] = React.useState(false);
 	const [showModePicker, setShowModePicker] = React.useState(false);
-	const [chatMode, setChatMode] = React.useState<"Agent" | "Ask" | "Edit">("Agent");
+	const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
 	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
 	const [downloadCatalog, setDownloadCatalog] = React.useState<LMSModelEntry[]>(LMS_MODEL_CATALOG_FALLBACK);
 	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, { progress: number; message: string }>>(new Map());
+	const [streamingText, setStreamingText] = React.useState<string | null>(null);
 	const [modePickerPos, setModePickerPos] = React.useState<{ top: number; left: number } | null>(null);
 	const [modelPickerPos, setModelPickerPos] = React.useState<{ top: number; left: number } | null>(null);
 	const messagesEndRef = React.useRef<HTMLDivElement>(null);
@@ -44,6 +48,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const modePickerRef = React.useRef<HTMLDivElement>(null);
 	const modeButtonRef = React.useRef<HTMLButtonElement>(null);
 	const modelButtonRef = React.useRef<HTMLButtonElement>(null);
+	const activeSessionIdRef = React.useRef<string | null>(null);
 
 	React.useEffect(() => {
 		const checkServer = async () => {
@@ -65,10 +70,34 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		});
 
 		const unsubSession = chatService.onDidUpdateSession((session) => {
-			setActiveSession({ ...session });
 			setSessions([...chatService.sessions]);
-			const lastMsg = session.messages[session.messages.length - 1];
-			setIsStreaming(!!lastMsg?.isStreaming);
+			const nextActive = chatService.activeSession;
+			activeSessionIdRef.current = nextActive?.id ?? null;
+			setActiveSession(nextActive ? { ...nextActive } : null);
+			if (nextActive) {
+				setChatMode(nextActive.mode);
+				setIsStreaming(chatService.streamingSessionId === nextActive.id);
+			} else {
+				setIsStreaming(false);
+			}
+		});
+
+		const unsubStream = chatService.onDidStreamEvent((event) => {
+			handleChatStreamEvent(event, {
+				onMessage: ({ sessionId }) => {
+					if (sessionId !== activeSessionIdRef.current) return;
+					setStreamingText(null);
+					setIsStreaming(false);
+				},
+				onSetStreamMode: (mode) => {
+					if (event.sessionId !== activeSessionIdRef.current) return;
+					setIsStreaming(mode !== "idle");
+				},
+				onStreamingText: (updater) => {
+					if (event.sessionId !== activeSessionIdRef.current) return;
+					setStreamingText(updater);
+				},
+			});
 		});
 
 		const unsubPull = lmsServerService.onDidPullProgress(({ modelId, message }) => {
@@ -81,16 +110,27 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			});
 		});
 
+		const session = chatService.ensureSession();
+		activeSessionIdRef.current = session.id;
+		setActiveSession(session);
+		setSessions([...chatService.sessions]);
+		setChatMode(session.mode);
+
 		return () => {
 			unsubStatus();
 			unsubSession();
+			unsubStream();
 			unsubPull();
 		};
 	}, [selectedModel]);
 
 	React.useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [activeSession?.messages]);
+	}, [activeSession?.messages, streamingText, isStreaming]);
+
+	React.useEffect(() => {
+		activeSessionIdRef.current = activeSession?.id ?? null;
+	}, [activeSession?.id]);
 
 	React.useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
@@ -123,7 +163,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			textareaRef.current.style.height = "auto";
 		}
 
-		await chatService.sendMessage(trimmed);
+		await chatService.sendMessage(trimmed, { mode: chatMode });
+	};
+
+	const handleStopGeneration = () => {
+		chatService.stopGeneration();
 	};
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -141,10 +185,13 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	};
 
 	const handleNewChat = () => {
-		chatService.createSession();
-		setActiveSession(chatService.activeSession);
+		const session = chatService.createSession();
+		activeSessionIdRef.current = session.id;
+		setActiveSession(session);
 		setSessions([...chatService.sessions]);
+		setChatMode(session.mode);
 		setInputValue("");
+		setStreamingText(null);
 	};
 
 	const handleSelectModel = (model: LMSInstalledModelInfo) => {
@@ -175,6 +222,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	};
 
 	const messages = activeSession?.messages ?? [];
+	const visibleStreamingText = streamingText;
 
 	return (
 		<div className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}>
@@ -187,7 +235,9 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							className={`cursor-pointer whitespace-nowrap border-b-2 border-transparent bg-transparent px-3 py-1.5 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
 							onClick={() => {
 								chatService.setActiveSession(session.id);
+								activeSessionIdRef.current = session.id;
 								setActiveSession(chatService.activeSession);
+								setStreamingText(null);
 							}}
 						>
 							{session.title}
@@ -254,6 +304,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 											key={mode}
 											className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${mode === chatMode ? "bg-highlight text-sky" : ""}`}
 											onClick={() => {
+												chatService.setMode(mode);
 												setChatMode(mode);
 												setShowModePicker(false);
 											}}
@@ -320,8 +371,13 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							<button className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
 								<ImageIcon className="h-4 w-4" />
 							</button>
-							<button className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
-								<Mic className="h-4 w-4" />
+							<button
+								className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+								onClick={isStreaming ? handleStopGeneration : undefined}
+								aria-label={isStreaming ? "Stop generation" : "Voice input"}
+								title={isStreaming ? "Stop generation" : "Voice input"}
+							>
+								{isStreaming ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-4 w-4" />}
 							</button>
 						</div>
 					</div>
@@ -385,6 +441,18 @@ export function ChatPanel({ className }: ChatPanelProps) {
 						{messages.map((msg) => (
 							<ChatMessageItem key={msg.id} message={msg} />
 						))}
+						{isStreaming && (
+							<ChatMessageItem
+								message={{
+									id: "streaming-preview",
+									role: "assistant",
+									content: visibleStreamingText ?? "",
+									timestamp: Date.now(),
+									isStreaming: true,
+									subtype: "message",
+								}}
+							/>
+						)}
 						<div ref={messagesEndRef} />
 					</div>
 				)}
@@ -458,6 +526,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 function ChatMessageItem({ message }: { message: ChatMessage }) {
 	const isUser = message.role === "user";
+	const isNotice = message.role === "system" || message.subtype === "error" || message.subtype === "interruption";
 
 	return (
 		<div className={`flex cursor-default select-text flex-col px-4 py-1.5 ${isUser ? "items-end" : ""}`}>
@@ -468,7 +537,7 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
 					</div>
 				</div>
 			)}
-			<div className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : ""}`}>
+			<div className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : ""}`}>
 				{message.isStreaming && !message.content ? (
 					<div className="flex gap-1 py-1">
 						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite] rounded-full bg-placeholder" />
@@ -476,7 +545,7 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
 						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite_0.4s] rounded-full bg-placeholder" />
 					</div>
 				) : (
-					<div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
+					<div className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`}>
 						{message.content.split("\n").map((line, i) => (
 							<React.Fragment key={i}>
 								{i > 0 && <br />}

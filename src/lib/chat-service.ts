@@ -1,20 +1,15 @@
+import { buildQueryContext } from "./chat/query-context";
+import { createTranscriptEntry, ChatSessionStore } from "./chat/session-store";
+import { buildAnthropicRequest } from "./chat/request-builder";
+import { LlamaChatAdapter } from "./chat/transports/llama-adapter";
+import type {
+	ChatMessage,
+	ChatMode,
+	ChatSession,
+	ChatTranscriptEntry,
+	ChatUiEvent,
+} from "./chat/types";
 import { lmsServerService, type LMSInstalledModelInfo } from "./server-service";
-
-export interface ChatMessage {
-	id: string;
-	role: "user" | "assistant" | "system";
-	content: string;
-	timestamp: number;
-	isStreaming?: boolean;
-}
-
-export interface ChatSession {
-	id: string;
-	title: string;
-	messages: ChatMessage[];
-	modelId: string | null;
-	createdAt: number;
-}
 
 type Listener<T> = (value: T) => void;
 
@@ -33,198 +28,243 @@ class SimpleEmitter<T> {
 	}
 }
 
-const DEFAULT_SERVER_URL = "http://localhost:8123";
-
-function extractContentText(content: string | Array<{ type?: string; text?: string }> | undefined | null): string {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) return content.map((p) => (typeof p?.text === "string" ? p.text : "")).join("");
-	return "";
-}
-
-function generateId(): string {
-	return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
 export class ChatService {
 	private readonly _onDidUpdateSession = new SimpleEmitter<ChatSession>();
 	readonly onDidUpdateSession = this._onDidUpdateSession.on.bind(this._onDidUpdateSession);
 
-	private readonly _onDidStreamChunk = new SimpleEmitter<{ sessionId: string; messageId: string; chunk: string }>();
-	readonly onDidStreamChunk = this._onDidStreamChunk.on.bind(this._onDidStreamChunk);
+	private readonly _onDidStreamEvent = new SimpleEmitter<ChatUiEvent>();
+	readonly onDidStreamEvent = this._onDidStreamEvent.on.bind(this._onDidStreamEvent);
 
-	private _sessions: ChatSession[] = [];
-	private _activeSessionId: string | null = null;
+	private readonly store = new ChatSessionStore();
+	private readonly transport = new LlamaChatAdapter();
 	private _currentModel: LMSInstalledModelInfo | null = null;
 	private _abortController: AbortController | null = null;
+	private _streamingSessionId: string | null = null;
+	private _isSending = false;
+	private _queuedMessages: Array<{
+		content: string;
+		options?: {
+			serverUrl?: string;
+			mode?: ChatMode;
+		};
+		resolve: () => void;
+		reject: (error: unknown) => void;
+	}> = [];
 
 	get sessions(): ChatSession[] {
-		return this._sessions;
+		return this.store.getSnapshots();
 	}
 
 	get activeSession(): ChatSession | null {
-		return this._sessions.find((s) => s.id === this._activeSessionId) ?? null;
+		return this.store.getActiveSnapshot();
 	}
 
 	get currentModel(): LMSInstalledModelInfo | null {
 		return this._currentModel;
 	}
 
+	get streamingSessionId(): string | null {
+		return this._streamingSessionId;
+	}
+
 	set currentModel(model: LMSInstalledModelInfo | null) {
 		this._currentModel = model;
+		const active = this.activeSession;
+		if (!active) return;
+		const updated = this.store.setSessionModel(active.id, model?.id ?? null);
+		if (updated) {
+			this._onDidUpdateSession.fire(updated);
+		}
 	}
 
 	createSession(title = "New Chat"): ChatSession {
-		const session: ChatSession = {
-			id: generateId(),
-			title,
-			messages: [],
-			modelId: this._currentModel?.id ?? null,
-			createdAt: Date.now(),
-		};
-		this._sessions.push(session);
-		this._activeSessionId = session.id;
+		const session = this.store.createSession(title, this._currentModel?.id ?? null);
+		this._onDidUpdateSession.fire(session);
+		return session;
+	}
+
+	ensureSession(): ChatSession {
+		const session = this.store.ensureSession(this._currentModel?.id ?? null);
+		this._onDidUpdateSession.fire(session);
 		return session;
 	}
 
 	setActiveSession(sessionId: string): void {
-		this._activeSessionId = sessionId;
+		const session = this.store.setActiveSession(sessionId);
+		if (session) {
+			this._onDidUpdateSession.fire(session);
+		}
 	}
 
-	async sendMessage(content: string, serverUrl?: string): Promise<void> {
-		let session = this.activeSession;
-		if (!session) {
-			session = this.createSession();
+	setMode(mode: ChatMode): void {
+		const active = this.activeSession;
+		if (!active) {
+			this.store.setDefaultMode(mode);
+			return;
+		}
+		const updated = this.store.setSessionMode(active.id, mode);
+		if (updated) {
+			this._onDidUpdateSession.fire(updated);
+		}
+	}
+
+	async sendMessage(
+		content: string,
+		options?: {
+			serverUrl?: string;
+			mode?: ChatMode;
+		},
+	): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			const task = { content, options, resolve, reject };
+			if (this._isSending) {
+				this._queuedMessages.push(task);
+				return;
+			}
+			void this.executeTask(task);
+		});
+	}
+
+	private async runSendMessage(
+		content: string,
+		options?: {
+			serverUrl?: string;
+			mode?: ChatMode;
+		},
+	): Promise<void> {
+		let session = this.store.ensureSession(this._currentModel?.id ?? null);
+		if (options?.mode && session.mode !== options.mode) {
+			session = this.store.setSessionMode(session.id, options.mode) ?? session;
 		}
 
-		const userMessage: ChatMessage = {
-			id: generateId(),
+		const userMessage = createTranscriptEntry({
 			role: "user",
 			content,
-			timestamp: Date.now(),
-		};
-		session.messages.push(userMessage);
-		this._onDidUpdateSession.fire(session);
+			visibility: "visible",
+			includeInHistory: true,
+			subtype: "message",
+		});
+		session = this.commitEntry(session.id, userMessage) ?? session;
 
-		const assistantMessage: ChatMessage = {
-			id: generateId(),
-			role: "assistant",
-			content: "",
-			timestamp: Date.now(),
-			isStreaming: true,
-		};
-		session.messages.push(assistantMessage);
-		this._onDidUpdateSession.fire(session);
-
-		const baseUrl = (serverUrl || DEFAULT_SERVER_URL).replace(/\/$/, "");
 		this._abortController = new AbortController();
+		this._streamingSessionId = session.id;
+		this._onDidStreamEvent.fire({
+			type: "stream_request_start",
+			sessionId: session.id,
+		});
+		let assistantContent = "";
 
 		try {
-			const chatMessages = session.messages
-				.filter((m) => !m.isStreaming)
-				.map((m) => ({ role: m.role, content: m.content }));
-			chatMessages.push({ role: "user", content });
-
-			const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					model: this._currentModel?.id ?? "default",
-					messages: chatMessages,
-					stream: true,
-				}),
-				signal: this._abortController.signal,
+			const queryContext = buildQueryContext({ session });
+			const request = buildAnthropicRequest({
+				session,
+				queryContext,
+				model: this._currentModel?.id ?? session.modelId ?? "default",
 			});
 
-			if (!response.ok) {
-				const errorText = await response.text().catch(() => "");
-				throw new Error(`Chat request failed: HTTP ${response.status}${errorText ? ` — ${errorText}` : ""}`);
+			for await (const event of this.transport.stream(request, {
+				serverUrl: options?.serverUrl,
+				signal: this._abortController.signal,
+			})) {
+				if (event.type === "content_delta") {
+					assistantContent += event.text;
+				}
+				this._onDidStreamEvent.fire({
+					type: "stream_event",
+					sessionId: session.id,
+					event,
+				});
 			}
 
-			const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-			const isSSE = contentType.includes("text/event-stream") && response.body;
-
-			if (isSSE) {
-				const reader = response.body!.getReader();
-				const decoder = new TextDecoder();
-				let buffer = "";
-
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-
-					buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-
-					while (true) {
-						const boundary = buffer.indexOf("\n\n");
-						if (boundary === -1) break;
-
-						const eventBlock = buffer.slice(0, boundary);
-						buffer = buffer.slice(boundary + 2);
-						const data = eventBlock
-							.split("\n")
-							.filter((line) => line.startsWith("data:"))
-							.map((line) => line.slice(5).trimStart())
-							.join("\n")
-							.trim();
-
-						if (!data || data === "[DONE]") continue;
-
-						try {
-							const parsed = JSON.parse(data) as {
-								choices?: Array<{
-									delta?: { content?: string | Array<{ type?: string; text?: string }> };
-									message?: { content?: string | Array<{ type?: string; text?: string }> };
-								}>;
-							};
-							for (const choice of parsed.choices ?? []) {
-								const source = choice.delta ?? choice.message;
-								const chunk = extractContentText(source?.content);
-								if (chunk) {
-									assistantMessage.content += chunk;
-									this._onDidStreamChunk.fire({
-										sessionId: session!.id,
-										messageId: assistantMessage.id,
-										chunk,
-									});
-								}
-							}
-						} catch {
-							// skip unparseable event blocks
-						}
-					}
-				}
-			} else {
-				const payload = (await response.json()) as {
-					choices?: Array<{
-						message?: { content?: string | Array<{ type?: string; text?: string }> };
-					}>;
-				};
-				for (const choice of payload.choices ?? []) {
-					const chunk = extractContentText(choice.message?.content);
-					if (chunk) {
-						assistantMessage.content += chunk;
-						this._onDidStreamChunk.fire({
-							sessionId: session!.id,
-							messageId: assistantMessage.id,
-							chunk,
-						});
-					}
-				}
+			if (assistantContent) {
+				this.commitEntry(
+					session.id,
+					createTranscriptEntry({
+						role: "assistant",
+						content: assistantContent,
+						visibility: "visible",
+						includeInHistory: true,
+						subtype: "message",
+					}),
+				);
 			}
-
-			assistantMessage.isStreaming = false;
-			assistantMessage.timestamp = Date.now();
-			this._onDidUpdateSession.fire(session!);
 		} catch (error) {
-			assistantMessage.isStreaming = false;
 			if (error instanceof Error && error.name === "AbortError") {
-				assistantMessage.content += "\n\n*[Generation stopped]*";
+				if (assistantContent) {
+					this.commitEntry(
+						session.id,
+						createTranscriptEntry({
+							role: "assistant",
+							content: assistantContent,
+							visibility: "visible",
+							includeInHistory: true,
+							subtype: "message",
+						}),
+					);
+				}
+				this.commitEntry(
+					session.id,
+					createTranscriptEntry({
+						role: "system",
+						content: "[Request interrupted by user]",
+						visibility: "visible",
+						includeInHistory: false,
+						isMeta: true,
+						subtype: "interruption",
+					}),
+				);
 			} else {
-				assistantMessage.content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+				if (assistantContent) {
+					this.commitEntry(
+						session.id,
+						createTranscriptEntry({
+							role: "assistant",
+							content: assistantContent,
+							visibility: "visible",
+							includeInHistory: true,
+							subtype: "message",
+						}),
+					);
+				}
+				this.commitEntry(
+					session.id,
+					createTranscriptEntry({
+						role: "assistant",
+						content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+						visibility: "visible",
+						includeInHistory: false,
+						subtype: "error",
+					}),
+				);
 			}
-			this._onDidUpdateSession.fire(session!);
 		} finally {
 			this._abortController = null;
+			this._streamingSessionId = null;
+		}
+	}
+
+	private async executeTask(task: {
+		content: string;
+		options?: {
+			serverUrl?: string;
+			mode?: ChatMode;
+		};
+		resolve: () => void;
+		reject: (error: unknown) => void;
+	}): Promise<void> {
+		this._isSending = true;
+		try {
+			await this.runSendMessage(task.content, task.options);
+			task.resolve();
+		} catch (error) {
+			task.reject(error);
+		} finally {
+			const next = this._queuedMessages.shift();
+			if (next) {
+				void this.executeTask(next);
+			} else {
+				this._isSending = false;
+			}
 		}
 	}
 
@@ -240,6 +280,32 @@ export class ChatService {
 			return [];
 		}
 	}
+
+	private commitEntry(sessionId: string, entry: ChatTranscriptEntry): ChatSession | null {
+		this._onDidStreamEvent.fire({
+			type: "message",
+			sessionId,
+			message: this.toChatMessage(entry),
+		});
+		const session = this.store.appendEntry(sessionId, entry);
+		if (session) {
+			const snapshot = this.store.getSnapshot(session.id) ?? session;
+			this._onDidUpdateSession.fire(snapshot);
+		}
+		return session;
+	}
+
+	private toChatMessage(entry: ChatTranscriptEntry): ChatMessage {
+		return {
+			id: entry.id,
+			role: entry.role,
+			content: entry.content,
+			timestamp: entry.timestamp,
+			isStreaming: entry.isStreaming,
+			subtype: entry.subtype,
+		};
+	}
 }
 
 export const chatService = new ChatService();
+export type { ChatMessage, ChatSession } from "./chat/types";

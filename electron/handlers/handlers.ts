@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
+import { buildLlamaServerArgs } from "./lms-config";
 
 const isWindows = process.platform === "win32";
 
@@ -205,13 +206,18 @@ export function registerLmsHandlers() {
         ? expandLmsPath("~/Library/Caches/llama.cpp/local-models")
         : expandLmsPath("~/.cache/llama.cpp/local-models");
 
-    const args = ["--host", "127.0.0.1", "--port", port];
+    let modelsDir: string | undefined;
     try {
       require("fs").accessSync(localModelsDir, require("fs").constants.F_OK);
-      args.push("--models-dir", localModelsDir);
+      modelsDir = localModelsDir;
     } catch {
       // no local models dir
     }
+
+    const args = buildLlamaServerArgs({
+      port,
+      localModelsDir: modelsDir,
+    });
 
     if (lmsServerProcess) {
       try {
