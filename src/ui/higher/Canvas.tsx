@@ -23,6 +23,7 @@ import {
   Settings as SettingsIcon,
   X,
 } from "lucide-react";
+import * as React from "react";
 
 import { Settings } from "./Settings";
 
@@ -125,7 +126,7 @@ export function PromptEditor({
           ) : null}
         </div>
         {openFiles.length > 0 ? (
-          <div className="flex items-center overflow-x-auto bg-panel-700 border-b border-border-500">
+          <div className="tab-scrollbar flex items-center overflow-x-auto bg-panel-700 border-b border-border-500">
             {openFiles.map((file) => {
               const isActive = activeFilePath === file.path;
               const isPreview = previewFilePath === file.path;
@@ -135,6 +136,11 @@ export function PromptEditor({
               return (
                 <div
                   key={file.path}
+                  ref={(el) => {
+                    if (isActive && el) {
+                      el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+                    }
+                  }}
                   className={cn(
                     "group relative flex h-[35px] items-center gap-1.5 border-r border-border-500/50 pl-3 pr-1 text-[13px] transition-colors",
                     isActive

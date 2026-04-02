@@ -1,3 +1,5 @@
+Sorry but its called ODEX - Omega Development Extension
+
 ### Prompt storage
 
 - Before a prompt is executed, let the model generate a title, that will be displayed immediately the prompt is to be generated.
@@ -64,3 +66,12 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 ``
 `
+
+### Stages of AI Workflow
+
+- Plan - Creating & Mergin Context - (base context - project context, code base context, rules of play, etc. Virtual context - how new things should work)
+- Execution
+- Notification / Result presentation (sandbox) / Verification and confirmation
+- Deployment
+- Logs
+

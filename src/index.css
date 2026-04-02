@@ -92,6 +92,13 @@
   }
 }
 
+.tab-scrollbar {
+  scrollbar-width: none;
+}
+.tab-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .electron-drag-region {
   -webkit-app-region: drag;
 }

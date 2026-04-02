@@ -19,3 +19,4 @@ BEFORE ANY EXECUTION, READ RELEVANT CONTEXT FROM THIS LIST:
 
 - - CODEBASE CONTEXT - All important information about the codebase, run commands, a general directory of information about the codebase
 
+- Whenever you're creating or copying implementation. Use a sinle component approach. i.e. Add a single component to ui folder and then reuse by creating variants of such component i.e. Dialogs, MessageBox, Alerts

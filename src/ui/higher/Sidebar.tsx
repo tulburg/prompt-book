@@ -175,8 +175,9 @@ function buildContextMenuItems(
 	hasClipboard: boolean,
 ): NativeContextMenuItem[] {
 	const items: NativeContextMenuItem[] = [];
+	const createTargetDirectory = getPasteTargetDirectory(node);
 
-	if (node.kind === "directory") {
+	if (createTargetDirectory) {
 		items.push(
 			{
 				type: "action",
@@ -192,7 +193,7 @@ function buildContextMenuItems(
 			},
 		);
 
-		if (hasClipboard) {
+		if (node.kind === "directory" && hasClipboard) {
 			items.push({
 				type: "action",
 				id: "paste",
@@ -666,6 +667,9 @@ export function Sidebar({
 		[flatEntries, selectedPath],
 	);
 	const canRenameOrDelete = Boolean(contextMenu?.node?.node.parentPath);
+	const contextMenuCreateTargetPath = contextMenu
+		? getPasteTargetDirectory(contextMenu.node)
+		: null;
 
 	const focusTree = React.useCallback(() => {
 		treeRef.current?.focus();
@@ -757,10 +761,17 @@ export function Sidebar({
 				if (actionId) {
 					switch (actionId) {
 						case "new-file":
-							onBeginCreate("file", node.path);
+							if (getPasteTargetDirectory(node)) {
+								onBeginCreate("file", getPasteTargetDirectory(node) ?? undefined);
+							}
 							break;
 						case "new-folder":
-							onBeginCreate("directory", node.path);
+							if (getPasteTargetDirectory(node)) {
+								onBeginCreate(
+									"directory",
+									getPasteTargetDirectory(node) ?? undefined,
+								);
+							}
 							break;
 						case "copy":
 							setClipboardPath(node.path);
@@ -1173,14 +1184,14 @@ export function Sidebar({
 					className="fixed z-50 min-w-[180px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-2xl"
 					style={{ left: `${menuX}px`, top: `${menuY}px` }}
 				>
-					{contextMenu.node.kind === "directory" ? (
+					{contextMenuCreateTargetPath ? (
 						<>
 							<button
 								type="button"
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
 								onClick={() =>
 									runMenuAction(() =>
-										onBeginCreate("file", contextMenu.node.path),
+										onBeginCreate("file", contextMenuCreateTargetPath),
 									)
 								}
 							>
@@ -1192,14 +1203,17 @@ export function Sidebar({
 								className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"
 								onClick={() =>
 									runMenuAction(() =>
-										onBeginCreate("directory", contextMenu.node.path),
+										onBeginCreate(
+											"directory",
+											contextMenuCreateTargetPath,
+										),
 									)
 								}
 							>
 								<FolderPlus className="h-4 w-4" />
 								New Folder
 							</button>
-							{clipboardPath ? (
+							{contextMenu.node.kind === "directory" && clipboardPath ? (
 								<button
 									type="button"
 									className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground/85 hover:bg-panel-500"

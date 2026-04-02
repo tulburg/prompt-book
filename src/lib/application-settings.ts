@@ -24,6 +24,14 @@ export interface ApplicationSettingsSection {
 	id: string;
 	title: string;
 	order: number;
+	icon?: string;
+	group?: string;
+}
+
+export interface ApplicationSettingsGroup {
+	id: string;
+	label: string;
+	order: number;
 }
 
 export interface ApplicationSettingOption {
@@ -37,6 +45,7 @@ export interface ApplicationSettingDescriptor<
 > {
 	key: K;
 	section: string;
+	subsection?: string;
 	order: number;
 	label: string;
 	categoryLabel: string;
@@ -69,16 +78,23 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
 	"explorer.autoReveal": true,
 };
 
+export const APPLICATION_SETTINGS_GROUPS: ApplicationSettingsGroup[] = [
+	{ id: "general", label: "General", order: 1 },
+	{ id: "features", label: "Features", order: 2 },
+];
+
 export const APPLICATION_SETTINGS_SECTIONS: ApplicationSettingsSection[] = [
 	{
 		id: "workbench",
 		title: "Workbench",
 		order: 1,
+		group: "general",
 	},
 	{
 		id: "explorer",
 		title: "Explorer",
 		order: 2,
+		group: "features",
 	},
 ];
 
@@ -86,11 +102,12 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 	{
 		key: "workbench.sidebar.visible",
 		section: "workbench",
+		subsection: "Layout",
 		order: 1,
-		label: "Sidebar: Visible",
+		label: "Sidebar",
 		categoryLabel: "Workbench",
 		description:
-			"Controls whether the primary sidebar is shown when the application opens.",
+			"Show the primary sidebar when the application opens.",
 		control: "boolean",
 		defaultValue: DEFAULT_APPLICATION_SETTINGS["workbench.sidebar.visible"],
 		keywords: ["sidebar", "layout", "visibility"],
@@ -98,8 +115,9 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 	{
 		key: "workbench.sidebar.sortOrder",
 		section: "workbench",
+		subsection: "Preferences",
 		order: 2,
-		label: "Sidebar: Sort Order",
+		label: "Sidebar Sort Order",
 		categoryLabel: "Workbench",
 		description:
 			"Controls how files and folders are sorted in the sidebar explorer.",
@@ -116,11 +134,12 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 	{
 		key: "explorer.compactFolders",
 		section: "explorer",
+		subsection: "Display",
 		order: 1,
-		label: "Explorer: Compact Folders",
+		label: "Compact Folders",
 		categoryLabel: "Explorer",
 		description:
-			"Controls whether the explorer compacts chains of single-child folders into a single row.",
+			"Compact chains of single-child folders into a single row.",
 		control: "boolean",
 		defaultValue: DEFAULT_APPLICATION_SETTINGS["explorer.compactFolders"],
 		keywords: ["explorer", "compact", "folders"],
@@ -128,11 +147,12 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 	{
 		key: "explorer.fileNesting.enabled",
 		section: "explorer",
+		subsection: "Display",
 		order: 2,
-		label: "Explorer: File Nesting Enabled",
+		label: "File Nesting",
 		categoryLabel: "Explorer",
 		description:
-			"Controls whether related generated files are nested beneath their primary file in the explorer.",
+			"Nest related generated files beneath their primary file.",
 		control: "boolean",
 		defaultValue:
 			DEFAULT_APPLICATION_SETTINGS["explorer.fileNesting.enabled"],
@@ -141,11 +161,12 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 	{
 		key: "explorer.autoReveal",
 		section: "explorer",
+		subsection: "Behavior",
 		order: 3,
-		label: "Explorer: Auto Reveal",
+		label: "Auto Reveal",
 		categoryLabel: "Explorer",
 		description:
-			"Controls whether the explorer automatically reveals the active editor file.",
+			"Automatically reveal the active editor file in the explorer.",
 		control: "boolean",
 		defaultValue: DEFAULT_APPLICATION_SETTINGS["explorer.autoReveal"],
 		keywords: ["explorer", "reveal", "active editor"],
