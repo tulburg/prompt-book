@@ -1,4 +1,4 @@
-import { lmsServerService, type LMSInstalledModelInfo } from "./lms-server-service";
+import { lmsServerService, type LMSInstalledModelInfo } from "./server-service";
 
 export interface ChatMessage {
 	id: string;

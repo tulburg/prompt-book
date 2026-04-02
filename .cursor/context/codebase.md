@@ -22,7 +22,7 @@ Desktop Runtime:
 - Application settings handlers start in - `electron/handlers/settings-handlers.ts`
 - Git status handlers start in - `electron/handlers/git-handlers.ts`
 - Native context menu handlers start in - `electron/handlers/ui-handlers.ts`
-- LMS / llama.cpp server handlers start in - `electron/handlers/lms-handlers.ts`
+- LMS / llama.cpp server handlers start in - `electron/handlers/handlers.ts`
 - Renderer IPC bridge exposed to `window.ipcRenderer` starts in - `electron/preload.ts`
 - Desktop packaging defaults and build flow start in - `electron-builder.json`, `package.json`, `scripts/build-desktop.ts`
 

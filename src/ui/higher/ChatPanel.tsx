@@ -11,12 +11,12 @@ import {
 	AlertCircle,
 } from "lucide-react";
 import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-service";
-import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/lms-server-service";
+import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/server-service";
 import {
 	fetchModelCatalog,
 	LMS_MODEL_CATALOG_FALLBACK,
 	type LMSModelEntry,
-} from "@/lib/lms-model-catalog";
+} from "@/lib/model-catalog";
 
 interface ChatPanelProps {
 	className?: string;
