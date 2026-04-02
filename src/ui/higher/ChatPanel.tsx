@@ -12,6 +12,7 @@ import {
 	Square,
 } from "lucide-react";
 import { chatService, type ChatMessage, type ChatSession } from "@/lib/chat-service";
+import type { PullProgressEvent } from "@/lib/model-downloads";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import { lmsServerService, type LMSInstalledModelInfo } from "@/lib/server-service";
 import {
@@ -20,6 +21,8 @@ import {
 	type LMSModelEntry,
 } from "@/lib/model-catalog";
 import type { ChatMode } from "@/lib/chat/types";
+import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
+import { Modal } from "@/ui/lower/Modal";
 
 interface ChatPanelProps {
 	className?: string;
@@ -38,7 +41,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
 	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
 	const [downloadCatalog, setDownloadCatalog] = React.useState<LMSModelEntry[]>(LMS_MODEL_CATALOG_FALLBACK);
-	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, { progress: number; message: string }>>(new Map());
+	const [downloadProgress, setDownloadProgress] = React.useState<Map<string, PullProgressEvent>>(new Map());
 	const [isLoadingModel, setIsLoadingModel] = React.useState(false);
 	const [streamingText, setStreamingText] = React.useState<string | null>(null);
 	const [modePickerPos, setModePickerPos] = React.useState<{ top: number; left: number } | null>(null);
@@ -50,6 +53,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const modeButtonRef = React.useRef<HTMLButtonElement>(null);
 	const modelButtonRef = React.useRef<HTMLButtonElement>(null);
 	const activeSessionIdRef = React.useRef<string | null>(null);
+	const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
 
 	React.useEffect(() => {
 		const checkServer = async () => {
@@ -78,7 +82,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			setServerStatus(status);
 		});
 
-		const unsubSession = chatService.onDidUpdateSession((session) => {
+		const unsubSession = chatService.onDidUpdateSession(() => {
 			setSessions([...chatService.sessions]);
 			const nextActive = chatService.activeSession;
 			activeSessionIdRef.current = nextActive?.id ?? null;
@@ -109,14 +113,30 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			});
 		});
 
-		const unsubPull = lmsServerService.onDidPullProgress(({ modelId, message }) => {
+		const unsubPull = lmsServerService.onDidPullProgress((event) => {
 			setDownloadProgress((prev) => {
 				const next = new Map(prev);
-				const pctMatch = message.match(/([\d.]+)%/);
-				const progress = pctMatch ? parseFloat(pctMatch[1]) : prev.get(modelId)?.progress ?? 0;
-				next.set(modelId, { progress, message });
+				next.set(event.modelId, event);
 				return next;
 			});
+
+			const existingTimer = downloadDismissTimersRef.current.get(event.modelId);
+			if (existingTimer) {
+				window.clearTimeout(existingTimer);
+				downloadDismissTimersRef.current.delete(event.modelId);
+			}
+
+			if (event.phase === "complete" || event.phase === "error" || event.phase === "cancelled") {
+				const timeoutId = window.setTimeout(() => {
+					setDownloadProgress((prev) => {
+						const next = new Map(prev);
+						next.delete(event.modelId);
+						return next;
+					});
+					downloadDismissTimersRef.current.delete(event.modelId);
+				}, 4000);
+				downloadDismissTimersRef.current.set(event.modelId, timeoutId);
+			}
 		});
 
 		const session = chatService.ensureSession();
@@ -130,6 +150,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			unsubSession();
 			unsubStream();
 			unsubPull();
+			for (const timeoutId of downloadDismissTimersRef.current.values()) {
+				window.clearTimeout(timeoutId);
+			}
+			downloadDismissTimersRef.current.clear();
 		};
 	}, [selectedModel]);
 
@@ -224,15 +248,23 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const handleDownloadModel = async (entry: LMSModelEntry) => {
 		setShowDownloadPanel(false);
 		try {
-			await lmsServerService.pullModel(entry.id, entry.quantization);
+			const installedModel = await lmsServerService.pullModel(entry.id, entry.quantization);
 			const models = await chatService.getInstalledModels();
 			setInstalledModels(models);
+			if (installedModel) {
+				setSelectedModel(installedModel);
+				chatService.currentModel = installedModel;
+			}
 		} catch (error) {
+			if (error instanceof Error && /cancelled/i.test(error.message)) {
+				return;
+			}
 			console.error("Download failed:", error);
 		}
 	};
 
 	const handleFetchCatalog = async () => {
+		setShowModelPicker(false);
 		setShowDownloadPanel(true);
 		try {
 			const catalog = await fetchModelCatalog();
@@ -242,8 +274,32 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		}
 	};
 
+	const handleCancelDownload = async (modelId: string) => {
+		try {
+			await lmsServerService.cancelPullModel(modelId);
+		} catch (error) {
+			console.error("Failed to cancel download:", error);
+		}
+	};
+
+	const getDownloadEntryName = React.useCallback(
+		(modelId: string) =>
+			downloadCatalog.find((entry) => entry.id === modelId)?.name ??
+			modelId.split("/").pop()?.replace(/-GGUF$/i, "").replace(/-/g, " ") ??
+			modelId,
+		[downloadCatalog],
+	);
+
+	const getDownloadMessage = React.useCallback((event: PullProgressEvent) => {
+		if (typeof event.progress === "number" && event.phase === "downloading") {
+			return `${event.message} · ${Math.round(event.progress)}%`;
+		}
+		return event.message;
+	}, []);
+
 	const messages = activeSession?.messages ?? [];
 	const visibleStreamingText = streamingText;
+	const activeDownloads = Array.from(downloadProgress.values());
 
 	return (
 		<div className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}>
@@ -488,57 +544,97 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				)}
 			</div>
 
-			{/* Download panel overlay */}
-			{showDownloadPanel && (
-				<div className="absolute inset-0 z-50 flex flex-col overflow-hidden bg-panel">
-					<div className="flex shrink-0 items-center justify-between border-b border-border-500 px-4 py-3 text-[13px] font-semibold text-foreground">
-						<span>Choose a model to download</span>
+			<Modal
+				open={showDownloadPanel}
+				onClose={() => setShowDownloadPanel(false)}
+				title="Choose a model to download"
+				description="The downloader now opens in a centered modal so the chat stays visible. Active downloads continue in a small floating indicator."
+				contentClassName="p-2"
+				footer={
+					<div className="flex justify-end">
 						<button
-							className="cursor-pointer border-none bg-transparent px-1 text-lg text-foreground-900 hover:text-foreground"
+							type="button"
+							className="cursor-pointer rounded-md border border-border-500 bg-transparent px-3 py-1.5 text-xs text-foreground hover:bg-border-500"
 							onClick={() => setShowDownloadPanel(false)}
 						>
-							&times;
+							Close
 						</button>
 					</div>
-					<div className="flex-1 overflow-y-auto p-2">
-						{downloadCatalog.map((entry) => {
-							const dlState = downloadProgress.get(entry.id);
-							return (
-								<div key={entry.id} className="flex items-center justify-between gap-3 rounded-md px-3 py-2.5 hover:bg-panel-400">
-									<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-										<span className="flex items-center gap-1.5 text-[13px] text-foreground">
-											{entry.name}
-											{entry.recommended && (
-												<span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">Recommended</span>
-											)}
+				}
+			>
+				<div className="space-y-1">
+					{downloadCatalog.map((entry) => {
+						const dlState = downloadProgress.get(entry.id);
+						const isActive =
+							dlState &&
+							dlState.phase !== "complete" &&
+							dlState.phase !== "error" &&
+							dlState.phase !== "cancelled";
+
+						return (
+							<div
+								key={entry.id}
+								className="flex items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-3 transition-colors hover:border-border-500 hover:bg-panel-400"
+							>
+								<div className="flex min-w-0 flex-1 flex-col gap-1">
+									<span className="flex items-center gap-1.5 text-[13px] text-foreground">
+										{entry.name}
+										{entry.recommended && (
+											<span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">Recommended</span>
+										)}
+									</span>
+									<span className="text-[11px] text-placeholder">
+										{entry.size} · {entry.description}
+									</span>
+									{dlState && (
+										<span className="truncate text-[11px] text-placeholder">
+											{getDownloadMessage(dlState)}
 										</span>
-										<span className="text-[11px] text-placeholder">
-											{entry.size} · {entry.description}
-										</span>
-									</div>
-									{dlState ? (
-										<div className="flex min-w-[100px] shrink-0 flex-col gap-1">
-											<div className="h-1 overflow-hidden rounded-sm bg-border-500">
-												<div
-													className="h-full rounded-sm bg-sky transition-[width] duration-300 ease-out"
-													style={{ width: `${dlState.progress}%` }}
-												/>
-											</div>
-											<span className="text-[10px] text-placeholder">
-												{dlState.message}
-											</span>
-										</div>
-									) : (
-										<button
-											className="shrink-0 cursor-pointer rounded border-none bg-sky px-3 py-1 text-xs text-white hover:opacity-90"
-											onClick={() => handleDownloadModel(entry)}
-										>
-											Download
-										</button>
 									)}
 								</div>
-							);
-						})}
+								{isActive ? (
+									<button
+										type="button"
+										className="shrink-0 cursor-pointer rounded border border-border-500 bg-transparent px-3 py-1 text-xs text-foreground hover:bg-border-500"
+										onClick={() => handleCancelDownload(entry.id)}
+									>
+										Cancel
+									</button>
+								) : (
+									<button
+										type="button"
+										className="shrink-0 cursor-pointer rounded border-none bg-sky px-3 py-1 text-xs text-white hover:opacity-90"
+										onClick={() => handleDownloadModel(entry)}
+									>
+										Download
+									</button>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			</Modal>
+
+			{activeDownloads.length > 0 && (
+				<div className="pointer-events-none fixed inset-x-0 bottom-6 z-[1200] flex justify-center px-4">
+					<div className="pointer-events-auto flex w-full max-w-[420px] flex-col gap-2">
+						{activeDownloads.map((event) => (
+							<DownloadIndicator
+								key={event.modelId}
+								title={getDownloadEntryName(event.modelId)}
+								message={getDownloadMessage(event)}
+								tone={
+									event.phase === "error"
+										? "error"
+										: event.phase === "complete"
+											? "complete"
+											: event.phase === "cancelled"
+												? "cancelled"
+												: "active"
+								}
+								onCancel={event.canCancel ? () => handleCancelDownload(event.modelId) : undefined}
+							/>
+						))}
 					</div>
 				</div>
 			)}

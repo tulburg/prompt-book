@@ -7,5 +7,7 @@ export * from "./higher/Sidebar";
 export * from "./higher/WindowFrame";
 
 export * from "./lower/Button";
+export * from "./lower/DownloadIndicator";
 export * from "./lower/Header";
+export * from "./lower/Modal";
 export * from "./lower/Typography";

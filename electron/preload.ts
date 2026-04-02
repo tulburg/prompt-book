@@ -1,5 +1,6 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type { ApplicationSettings } from '../src/lib/application-settings'
+import type { PullProgressEvent } from '../src/lib/model-downloads'
 import type { NativeContextMenuRequest } from '../src/lib/native-context-menu'
 
 // --------- Expose some API to the Renderer process ---------
@@ -72,8 +73,9 @@ contextBridge.exposeInMainWorld("lmsBridge", {
   isBinaryInstalled: () => ipcRenderer.invoke("lms:is-binary-installed"),
   downloadBinary: () => ipcRenderer.invoke("lms:download-binary"),
   downloadModel: (modelId: string) => ipcRenderer.invoke("lms:download-model", modelId),
-  onDownloadProgress: (listener: (data: { modelId: string; message: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { modelId: string; message: string }) => listener(data)
+  cancelDownloadModel: (modelId: string) => ipcRenderer.invoke("lms:cancel-download-model", modelId),
+  onDownloadProgress: (listener: (data: PullProgressEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: PullProgressEvent) => listener(data)
     ipcRenderer.on("lms:download-progress", handler)
     return () => { ipcRenderer.off("lms:download-progress", handler) }
   },

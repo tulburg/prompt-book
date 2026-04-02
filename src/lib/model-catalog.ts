@@ -12,29 +12,46 @@ interface HFModelInfo {
 	id: string;
 	downloads: number;
 	tags?: string[];
+	pipeline_tag?: string;
 }
 
 export async function fetchModelCatalog(signal?: AbortSignal): Promise<LMSModelEntry[]> {
-	const url =
-		"https://huggingface.co/api/models?author=lmstudio-community&filter=gguf&sort=downloads&direction=-1&limit=60";
+	const controller = signal ? null : AbortSignal.timeout(8000);
+	const queries = [
+		"https://huggingface.co/api/models?author=lmstudio-community&filter=gguf&sort=downloads&direction=-1&limit=60",
+		"https://huggingface.co/api/models?author=unsloth&search=Qwen3.5&filter=gguf&sort=downloads&direction=-1&limit=20",
+		"https://huggingface.co/api/models?author=Qwen&search=Qwen3.5&filter=gguf&sort=downloads&direction=-1&limit=20",
+	];
 
-	const res = await fetch(url, { signal: signal ?? AbortSignal.timeout(8000) });
-	if (!res.ok) {
-		throw new Error(`HuggingFace API returned HTTP ${res.status}`);
+	const responses = await Promise.all(
+		queries.map(async (url) => {
+			const res = await fetch(url, { signal: signal ?? controller });
+			if (!res.ok) {
+				throw new Error(`HuggingFace API returned HTTP ${res.status}`);
+			}
+			return (await res.json()) as HFModelInfo[];
+		}),
+	);
+
+	const deduped = new Map<string, HFModelInfo>();
+	for (const batch of responses) {
+		for (const model of batch) {
+			const existing = deduped.get(model.id);
+			if (!existing || existing.downloads < model.downloads) {
+				deduped.set(model.id, model);
+			}
+		}
 	}
 
-	const raw = (await res.json()) as HFModelInfo[];
-
-	const entries: LMSModelEntry[] = raw
-		.filter((m) => isUsableModel(m.id))
+	const entries: LMSModelEntry[] = Array.from(deduped.values())
+		.filter((model) => isUsableModel(model))
+		.sort((a, b) => {
+			const scoreDiff = getCatalogPriority(a) - getCatalogPriority(b);
+			if (scoreDiff !== 0) return scoreDiff;
+			return b.downloads - a.downloads;
+		})
 		.map((m) => toEntry(m))
 		.filter((e): e is LMSModelEntry => e !== null);
-
-	entries.sort((a, b) => {
-		const aCode = isCodingModel(a.name) ? 0 : 1;
-		const bCode = isCodingModel(b.name) ? 0 : 1;
-		return aCode - bCode;
-	});
 
 	const recommendedIdx = entries.findIndex((e) => isCodingModel(e.name));
 	const idx = recommendedIdx >= 0 ? recommendedIdx : 0;
@@ -63,34 +80,62 @@ function isInstructionTuned(repo: string): boolean {
 		lower.includes("deepseek-r1") ||
 		lower.startsWith("phi-4") ||
 		lower.startsWith("gpt-oss") ||
-		/^glm-\d/.test(lower)
+		/^glm-\d/.test(lower) ||
+		lower.includes("qwen3.5")
 	) {
 		return true;
 	}
 	return false;
 }
 
-function isUsableModel(id: string): boolean {
-	const repo = id.split("/").pop() ?? "";
+function isUsableModel(model: HFModelInfo): boolean {
+	const repo = model.id.split("/").pop() ?? "";
 	if (!repo.endsWith("-GGUF")) {
 		return false;
 	}
 
 	const lower = repo.toLowerCase();
+	const tagString = (model.tags ?? []).join(" ").toLowerCase();
 	if (
 		lower.includes("mlx") ||
 		lower.includes("embed") ||
 		lower.includes("vision") ||
 		/[-_]vl[-_]/.test(lower) ||
 		lower.endsWith("-vl") ||
-		lower.startsWith("vl-")
+		lower.startsWith("vl-") ||
+		tagString.includes("multimodal") ||
+		tagString.includes("vision-language-model")
+	) {
+		return false;
+	}
+	if (
+		lower.includes("uncensored") ||
+		lower.includes("abliterated") ||
+		lower.includes("aggressive") ||
+		lower.includes("lora") ||
+		lower.includes("adapter") ||
+		tagString.includes("uncensored") ||
+		tagString.includes("lora")
 	) {
 		return false;
 	}
 	if (!/\d+(?:\.\d+)?[bB]/.test(repo)) {
 		return false;
 	}
-	return isInstructionTuned(repo);
+	return isInstructionTuned(repo) || isQwen35Model(model);
+}
+
+function isQwen35Model(model: HFModelInfo): boolean {
+	const lowerId = model.id.toLowerCase();
+	const tags = (model.tags ?? []).join(" ").toLowerCase();
+	return lowerId.includes("qwen3.5") || tags.includes("qwen3.5") || tags.includes("qwen3_5");
+}
+
+function getCatalogPriority(model: HFModelInfo): number {
+	const lowerId = model.id.toLowerCase();
+	if (isCodingModel(lowerId)) return 0;
+	if (isQwen35Model(model)) return 1;
+	return 2;
 }
 
 function toEntry(m: HFModelInfo): LMSModelEntry | null {
@@ -164,6 +209,14 @@ export const LMS_MODEL_CATALOG_FALLBACK: LMSModelEntry[] = [
 		name: "Qwen 3 Coder 30B A3B Instruct",
 		description: "Latest top-tier coding model. Fast MoE architecture — only 3B active params.",
 		size: "~20 GB",
+		contextWindow: 131072,
+	},
+	{
+		id: "unsloth/Qwen3.5-9B-GGUF",
+		quantization: "",
+		name: "Qwen 3.5 9B",
+		description: "Latest Qwen 3.5 family option for local chat and coding tasks.",
+		size: "~5.1 GB",
 		contextWindow: 131072,
 	},
 	{

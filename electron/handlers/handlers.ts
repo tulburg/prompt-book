@@ -2,6 +2,11 @@ import { ipcMain } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { buildLlamaServerArgs } from "./lms-config";
+import {
+  downloadModelToLocalStore,
+  emitDownloadProgress,
+  getLocalModelsDir,
+} from "./model-download";
 
 const isWindows = process.platform === "win32";
 
@@ -59,6 +64,18 @@ function resolveLlamaBinaryPath(): string | undefined {
 }
 
 let lmsServerProcess: ReturnType<typeof spawn> | undefined;
+const activeModelDownloads = new Map<string, AbortController>();
+
+function splitDownloadSpecifier(modelId: string): { repoId: string; quantization?: string } {
+  const separatorIndex = modelId.lastIndexOf(":");
+  if (separatorIndex === -1) {
+    return { repoId: modelId };
+  }
+  return {
+    repoId: modelId.slice(0, separatorIndex),
+    quantization: modelId.slice(separatorIndex + 1) || undefined,
+  };
+}
 
 export function killLmsServer() {
   if (lmsServerProcess) {
@@ -96,94 +113,40 @@ export function registerLmsHandlers() {
   });
 
   ipcMain.handle("lms:download-model", async (event, modelId: string) => {
-    const binaryPath = resolveLlamaBinaryPath();
-    if (!binaryPath) {
-      throw new Error("llama-server binary not found. Please install llama.cpp first.");
+    const abort = new AbortController();
+    activeModelDownloads.set(modelId, abort);
+    try {
+      const { repoId, quantization } = splitDownloadSpecifier(modelId);
+      return await downloadModelToLocalStore({
+        modelId: repoId,
+        progressModelId: modelId,
+        quantization,
+        signal: abort.signal,
+        sender: event.sender,
+      });
+    } catch (error) {
+      const phase = abort.signal.aborted ? "cancelled" : "error";
+      emitDownloadProgress(event.sender, {
+        modelId,
+        phase,
+        message:
+          error instanceof Error
+            ? error.message
+            : abort.signal.aborted
+              ? "Download cancelled."
+              : "Download failed.",
+      });
+      throw error;
+    } finally {
+      if (activeModelDownloads.get(modelId) === abort) {
+        activeModelDownloads.delete(modelId);
+      }
     }
+  });
 
-    const tempPort = 38000 + Math.floor(Math.random() * 10000);
-    const args = ["-hf", modelId, "--host", "127.0.0.1", "--port", String(tempPort)];
-
-    return new Promise<void>((resolve, reject) => {
-      const proc = spawn(binaryPath, args, {
-        env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      let settled = false;
-      let lastOutput = "";
-
-      const finish = (error?: Error) => {
-        if (settled) return;
-        settled = true;
-        if (healthPoller) clearInterval(healthPoller);
-        if (heartbeat) clearInterval(heartbeat);
-        if (error) reject(error);
-        else resolve();
-      };
-
-      const stopTempServer = () => {
-        try { proc.kill(); } catch { /* ignore */ }
-      };
-
-      const emitProgress = (message: string) => {
-        const cleaned = message.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").trim();
-        if (!cleaned) return;
-        lastOutput = cleaned;
-        event.sender.send("lms:download-progress", { modelId, message: cleaned });
-      };
-
-      let stdoutBuf = "";
-      let stderrBuf = "";
-
-      const handleChunk = (chunk: Buffer, isStdout: boolean) => {
-        const buffered = (isStdout ? stdoutBuf : stderrBuf) + chunk.toString();
-        const segments = buffered.split(/\r\n|[\r\n]/);
-        const nextBuffer = /[\r\n]$/.test(buffered) ? "" : (segments.pop() ?? "");
-        for (const segment of segments) emitProgress(segment);
-        if (isStdout) stdoutBuf = nextBuffer;
-        else stderrBuf = nextBuffer;
-      };
-
-      proc.stdout?.on("data", (chunk: Buffer) => handleChunk(chunk, true));
-      proc.stderr?.on("data", (chunk: Buffer) => handleChunk(chunk, false));
-      proc.on("error", (error) => finish(error));
-      proc.on("close", (code) => {
-        if (stdoutBuf) emitProgress(stdoutBuf);
-        if (stderrBuf) emitProgress(stderrBuf);
-        if (!settled) {
-          const detail = lastOutput ? ` — ${lastOutput}` : "";
-          finish(new Error(`llama-server -hf exited with code ${code ?? "unknown"}${detail}`));
-        }
-      });
-
-      const heartbeat = setInterval(() => {
-        if (!settled) {
-          event.sender.send("lms:download-progress", { modelId, message: "Downloading model into llama.cpp cache..." });
-        }
-      }, 3000);
-
-      const tempBaseUrl = `http://127.0.0.1:${tempPort}`;
-      const startedAt = Date.now();
-      const healthPoller = setInterval(async () => {
-        if (settled) return;
-        try {
-          const response = await fetch(`${tempBaseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-          if (response.ok) {
-            event.sender.send("lms:download-progress", { modelId, message: "Model cached successfully." });
-            stopTempServer();
-            finish();
-            return;
-          }
-        } catch {
-          // keep polling
-        }
-        if (Date.now() - startedAt > 10 * 60 * 1000) {
-          stopTempServer();
-          finish(new Error(`Timed out while caching model ${modelId}.`));
-        }
-      }, 1000);
-    });
+  ipcMain.handle("lms:cancel-download-model", async (_event, modelId: string) => {
+    activeModelDownloads.get(modelId)?.abort();
+    activeModelDownloads.delete(modelId);
   });
 
   ipcMain.handle("lms:start-server", async (_event, serverUrl: string) => {
@@ -200,14 +163,9 @@ export function registerLmsHandlers() {
       // use default
     }
 
-    const localModelsDir = isWindows
-      ? expandLmsPath("%LOCALAPPDATA%\\llama.cpp\\local-models")
-      : process.platform === "darwin"
-        ? expandLmsPath("~/Library/Caches/llama.cpp/local-models")
-        : expandLmsPath("~/.cache/llama.cpp/local-models");
-
     let modelsDir: string | undefined;
     try {
+      const localModelsDir = getLocalModelsDir();
       require("fs").accessSync(localModelsDir, require("fs").constants.F_OK);
       modelsDir = localModelsDir;
     } catch {

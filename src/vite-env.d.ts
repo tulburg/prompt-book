@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { NativeContextMenuBridge } from "@/lib/native-context-menu";
+import type { DownloadedModelArtifact, PullProgressEvent } from "@/lib/model-downloads";
 import type { SettingsBridge } from "@/lib/application-settings";
 import type { ProjectBridge } from "@/lib/project-files";
 
@@ -27,8 +28,9 @@ declare global {
 		lmsBridge?: {
 			isBinaryInstalled: () => Promise<boolean>;
 			downloadBinary: () => Promise<void>;
-			downloadModel: (modelId: string) => Promise<void>;
-			onDownloadProgress: (listener: (data: { modelId: string; message: string }) => void) => () => void;
+			downloadModel: (modelId: string) => Promise<DownloadedModelArtifact>;
+			cancelDownloadModel: (modelId: string) => Promise<void>;
+			onDownloadProgress: (listener: (data: PullProgressEvent) => void) => () => void;
 			startServer: (serverUrl: string) => Promise<void>;
 			stopServer: () => Promise<void>;
 		};

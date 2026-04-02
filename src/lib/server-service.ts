@@ -1,5 +1,7 @@
 export type LMServerStatus = "stopped" | "starting" | "running" | "error";
 
+import type { DownloadedModelArtifact, PullProgressEvent } from "./model-downloads";
+
 export function normalizePullModelId(modelId: string, quantization?: string): string {
 	let normalized = modelId.trim();
 	if (normalized.startsWith("https://huggingface.co/")) {
@@ -25,11 +27,6 @@ export interface LMSLoadModelOptions {
 	serverUrl?: string;
 }
 
-export interface PullProgressEvent {
-	modelId: string;
-	message: string;
-}
-
 type Listener<T> = (value: T) => void;
 
 class SimpleEmitter<T> {
@@ -48,6 +45,35 @@ class SimpleEmitter<T> {
 }
 
 const DEFAULT_LLAMA_SERVER_URL = "http://localhost:8123";
+
+function resolveInstalledModelAfterDownload(
+	models: LMSInstalledModelInfo[],
+	artifact: DownloadedModelArtifact,
+): LMSInstalledModelInfo | null {
+	const lowerFileName = artifact.fileName.toLowerCase();
+	const fileStem = lowerFileName.replace(/\.gguf$/i, "");
+
+	const ranked = models
+		.map((model) => {
+			const lowerId = model.id.toLowerCase();
+			const lowerDisplayName = model.displayName.toLowerCase();
+
+			if (lowerId === lowerFileName || lowerDisplayName === lowerFileName) {
+				return { model, score: 0 };
+			}
+			if (lowerId.endsWith(`/${lowerFileName}`) || lowerId.endsWith(`\\${lowerFileName}`)) {
+				return { model, score: 1 };
+			}
+			if (lowerId.includes(fileStem) || lowerDisplayName.includes(fileStem)) {
+				return { model, score: 2 };
+			}
+			return { model, score: Number.POSITIVE_INFINITY };
+		})
+		.filter((entry) => Number.isFinite(entry.score))
+		.sort((a, b) => a.score - b.score);
+
+	return ranked[0]?.model ?? null;
+}
 
 export class LMSServerService {
 	private readonly _onDidChangeStatus = new SimpleEmitter<LMServerStatus>();
@@ -207,32 +233,61 @@ export class LMSServerService {
 		}
 	}
 
-	async pullModel(modelId: string, quantization?: string): Promise<void> {
+	async pullModel(modelId: string, quantization?: string): Promise<LMSInstalledModelInfo | null> {
 		const normalizedModelId = normalizePullModelId(modelId, quantization);
 		const abort = new AbortController();
 		this._pullAborts.set(normalizedModelId, abort);
-		this._onDidPullProgress.fire({ modelId: normalizedModelId, message: "Starting download..." });
+		this._onDidPullProgress.fire({
+			modelId: normalizedModelId,
+			phase: "queued",
+			message: "Starting download...",
+			canCancel: true,
+		});
 
 		let unsubProgress: (() => void) | undefined;
 		try {
+			let artifact: DownloadedModelArtifact | null = null;
 			if (window.lmsBridge) {
 				unsubProgress = window.lmsBridge.onDownloadProgress((data) => {
 					this._onDidPullProgress.fire(data);
 				});
-				await window.lmsBridge.downloadModel(normalizedModelId);
+				artifact = await window.lmsBridge.downloadModel(normalizedModelId);
 			} else {
-				await window.ipcRenderer.invoke("lms:download-model", normalizedModelId);
+				artifact = await window.ipcRenderer.invoke("lms:download-model", normalizedModelId) as DownloadedModelArtifact;
 			}
 
-			this._onDidPullProgress.fire({ modelId: normalizedModelId, message: "Loading model..." });
+			if (abort.signal.aborted) {
+				return null;
+			}
+
+			this._onDidPullProgress.fire({
+				modelId: normalizedModelId,
+				phase: "loading",
+				message: "Refreshing model list...",
+			});
 
 			await this.stopServer();
 			await this.startServer();
-			await this.loadModel(normalizedModelId);
+			const installedModels = await this.listInstalledModels();
+			const resolvedModel = artifact ? resolveInstalledModelAfterDownload(installedModels, artifact) : null;
+			if (resolvedModel) {
+				this._onDidPullProgress.fire({
+					modelId: normalizedModelId,
+					phase: "loading",
+					message: "Loading downloaded model...",
+				});
+				await this.loadModel(resolvedModel.id);
+			}
 
 			if (!abort.signal.aborted) {
-				this._onDidPullProgress.fire({ modelId: normalizedModelId, message: "Download complete!" });
+				this._onDidPullProgress.fire({
+					modelId: normalizedModelId,
+					phase: "complete",
+					message: resolvedModel ? "Download complete." : "Downloaded. Select the model from the picker.",
+					progress: 100,
+				});
 			}
+			return resolvedModel;
 		} finally {
 			unsubProgress?.();
 			if (this._pullAborts.get(normalizedModelId) === abort) {
@@ -245,6 +300,16 @@ export class LMSServerService {
 		const normalizedModelId = normalizePullModelId(modelId);
 		this._pullAborts.get(normalizedModelId)?.abort();
 		this._pullAborts.delete(normalizedModelId);
+		this._onDidPullProgress.fire({
+			modelId: normalizedModelId,
+			phase: "cancelled",
+			message: "Download cancelled.",
+		});
+		if (window.lmsBridge) {
+			await window.lmsBridge.cancelDownloadModel(normalizedModelId);
+			return;
+		}
+		await window.ipcRenderer.invoke("lms:cancel-download-model", normalizedModelId);
 	}
 
 	async startServer(serverUrl?: string): Promise<void> {
