@@ -35,6 +35,8 @@ export type ChatToolUiKind =
 	| "file_list"
 	| "command"
 	| "todo_list"
+	| "question"
+	| "task"
 	| "json"
 	| "diff";
 
@@ -97,6 +99,38 @@ export interface ChatToolDisplayTodoList {
 	}>;
 }
 
+export interface ChatToolDisplayQuestion {
+	kind: "question";
+	title?: string;
+	description?: string;
+	submitLabel?: string;
+	helpText?: string;
+	questions: Array<{
+		id: string;
+		prompt: string;
+		details?: string;
+		responseType: "text" | "single_select" | "multi_select";
+		options?: Array<{
+			id: string;
+			label: string;
+		}>;
+	}>;
+}
+
+export interface ChatToolDisplayTask {
+	kind: "task";
+	title?: string;
+	status: "pending" | "running" | "completed" | "blocked" | "failed";
+	summary: string;
+	agentName?: string;
+	prompt?: string;
+	result?: string;
+	metadata?: Array<{
+		label: string;
+		value: string;
+	}>;
+}
+
 export interface ChatToolDisplayJson {
 	kind: "json";
 	title?: string;
@@ -128,6 +162,8 @@ export type ChatToolDisplay =
 	| ChatToolDisplayFileList
 	| ChatToolDisplayCommand
 	| ChatToolDisplayTodoList
+	| ChatToolDisplayQuestion
+	| ChatToolDisplayTask
 	| ChatToolDisplayJson
 	| ChatToolDisplayDiff;
 
@@ -136,6 +172,7 @@ export interface ChatToolResult {
 	display?: ChatToolDisplay;
 	isError?: boolean;
 	structuredContent?: JsonObject;
+	pauseAfter?: boolean;
 }
 
 export interface ChatToolContext {

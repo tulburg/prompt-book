@@ -8,6 +8,7 @@ export interface ApplicationSettings {
 	"explorer.compactFolders": boolean;
 	"explorer.fileNesting.enabled": boolean;
 	"explorer.autoReveal": boolean;
+	"chat.providers.google.apiKey": string;
 }
 
 export type ApplicationSettingKey = keyof ApplicationSettings;
@@ -17,6 +18,7 @@ export type ApplicationSettingControl =
 	| "boolean"
 	| "select"
 	| "text"
+	| "password"
 	| "textarea"
 	| "number";
 
@@ -76,6 +78,7 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
 	"explorer.compactFolders": true,
 	"explorer.fileNesting.enabled": true,
 	"explorer.autoReveal": true,
+	"chat.providers.google.apiKey": "",
 };
 
 export const APPLICATION_SETTINGS_GROUPS: ApplicationSettingsGroup[] = [
@@ -94,6 +97,12 @@ export const APPLICATION_SETTINGS_SECTIONS: ApplicationSettingsSection[] = [
 		id: "explorer",
 		title: "Explorer",
 		order: 2,
+		group: "features",
+	},
+	{
+		id: "chat",
+		title: "Chat",
+		order: 3,
 		group: "features",
 	},
 ];
@@ -171,6 +180,20 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 		defaultValue: DEFAULT_APPLICATION_SETTINGS["explorer.autoReveal"],
 		keywords: ["explorer", "reveal", "active editor"],
 	},
+	{
+		key: "chat.providers.google.apiKey",
+		section: "chat",
+		subsection: "Providers",
+		order: 1,
+		label: "Google Gemini API Key",
+		categoryLabel: "Chat",
+		description:
+			"Adds Gemini models to the chat model picker when a valid API key is configured.",
+		control: "password",
+		defaultValue: DEFAULT_APPLICATION_SETTINGS["chat.providers.google.apiKey"],
+		placeholder: "AIza...",
+		keywords: ["chat", "gemini", "google", "api", "key", "models"],
+	},
 ];
 
 export function serializeApplicationSettings(settings: ApplicationSettings) {
@@ -223,6 +246,11 @@ export function sanitizeApplicationSettings(
 
 	if (typeof candidate["explorer.autoReveal"] === "boolean") {
 		nextSettings["explorer.autoReveal"] = candidate["explorer.autoReveal"];
+	}
+
+	if (typeof candidate["chat.providers.google.apiKey"] === "string") {
+		nextSettings["chat.providers.google.apiKey"] =
+			candidate["chat.providers.google.apiKey"];
 	}
 
 	return nextSettings;

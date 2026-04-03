@@ -97,6 +97,7 @@ const STOP_SEQUENCES_BY_FORMAT: Record<AnthropicRequest["format"], string[]> = {
 	openai: ["<|im_end|>", "<|endoftext|>"],
 	gemma: ["<end_of_turn>", "<eos>"],
 	anthropic: [],
+	gemini: [],
 };
 
 export function buildLlamaChatCompletionRequest(

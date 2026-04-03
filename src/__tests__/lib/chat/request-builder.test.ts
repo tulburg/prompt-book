@@ -99,6 +99,7 @@ describe("request builder", () => {
 				now: new Date("2026-04-02T12:00:00.000Z"),
 			}),
 			model: "local-model",
+			provider: "llama",
 		});
 
 		expect(request.format).toBe("anthropic");
@@ -143,6 +144,7 @@ describe("request builder", () => {
 				now: new Date("2026-04-02T12:00:00.000Z"),
 			}),
 			model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+			provider: "llama",
 		});
 
 		expect(request.format).toBe("qwen");
@@ -186,6 +188,7 @@ describe("request builder", () => {
 			}),
 			model: "openai/gpt-oss-20b",
 			modelName: "GPT OSS 20B",
+			provider: "llama",
 		});
 
 		expect(request.format).toBe("openai");
@@ -230,11 +233,14 @@ describe("request builder", () => {
 			}),
 			model: "openai/gpt-oss-20b",
 			modelName: "GPT OSS 20B",
+			provider: "llama",
 			toolContext: fakeToolContext,
 		});
 
 		expect(request.nativeToolCalling).toBe(true);
 		expect(request.tools?.some((tool) => tool.function.name === "Read")).toBe(true);
+		expect(request.tools?.some((tool) => tool.function.name === "AskUserQuestion")).toBe(true);
+		expect(request.tools?.some((tool) => tool.function.name === "Agent")).toBe(true);
 		const bashTool = request.tools?.find((tool) => tool.function.name === "Bash");
 		expect(bashTool?.function.parameters.properties?.timeout?.type).toBe("integer");
 		expect(bashTool?.function.parameters.properties?.run_in_background?.type).toBe("boolean");
@@ -298,6 +304,7 @@ describe("request builder", () => {
 				now: new Date("2026-04-02T12:00:00.000Z"),
 			}),
 			model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+			provider: "llama",
 			toolContext: fakeToolContext,
 		});
 
@@ -373,6 +380,7 @@ describe("request builder", () => {
 			}),
 			model: "google/gemma-3-27b-it",
 			modelName: "Gemma 3 27B",
+			provider: "llama",
 			toolContext: fakeToolContext,
 		});
 
@@ -386,5 +394,82 @@ describe("request builder", () => {
 		expect(request.messages[1]?.content?.[0]?.text).toContain("Tool result (error) for tool-2:");
 		expect(request.messages[1]?.content?.[0]?.text).toContain('"ok":false');
 		expect(request.messages[1]?.content?.[0]?.text).toContain("missing file");
+	});
+
+	it("formats Gemini requests with plain text tool history and google provider metadata", () => {
+		const session: ChatSessionState = {
+			id: "session-gemini",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "gemini-2.5-flash",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Inspect the workspace",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+				createTranscriptEntry({
+					role: "assistant",
+					content: 'Read({"file_path":"/workspace/file.txt"})',
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_use",
+					toolInvocation: {
+						toolCallId: "tool-gemini",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+					},
+				}),
+				createTranscriptEntry({
+					role: "tool",
+					content: "file contents",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_result",
+					toolResult: {
+						toolCallId: "tool-gemini",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+						outputText: "file contents",
+					},
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "gemini-2.5-flash",
+			modelName: "Gemini 2.5 Flash",
+			provider: "google",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.format).toBe("gemini");
+		expect(request.nativeToolCalling).toBe(false);
+		expect(request.metadata.provider).toBe("google");
+		expect(request.messages[1]).toEqual({
+			role: "assistant",
+			content: [
+				{
+					type: "text",
+					text: 'Read({"file_path":"/workspace/file.txt"})',
+				},
+			],
+		});
+		expect(request.messages[2]).toMatchObject({
+			role: "user",
+			tool_call_id: "tool-gemini",
+			name: "Read",
+		});
 	});
 });

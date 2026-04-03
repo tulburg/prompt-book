@@ -17,8 +17,11 @@ import { webFetchTool } from "./builtin/web-fetch-tool";
 import { webSearchTool } from "./builtin/web-search-tool";
 import { writeTool } from "./builtin/write-tool";
 import {
+	agentTool,
+	askUserQuestionTool,
 	sendUserMessageTool,
 	structuredOutputTool,
+	taskOutputTool,
 	taskStopTool,
 	toolSearchTool,
 	unsupportedWorkflowTools,
@@ -41,9 +44,12 @@ const ALL_TOOLS: ChatToolDefinition[] = [
 	taskListTool,
 	taskUpdateTool,
 	taskStopTool,
+	askUserQuestionTool,
+	agentTool,
 	sendUserMessageTool,
 	structuredOutputTool,
 	toolSearchTool,
+	taskOutputTool,
 	...unsupportedWorkflowTools,
 	...unsupportedAdvancedTools,
 ];

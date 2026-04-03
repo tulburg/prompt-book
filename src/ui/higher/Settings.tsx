@@ -133,6 +133,23 @@ function renderControl(
 					placeholder={descriptor.placeholder}
 				/>
 			);
+		case "password":
+			return (
+				<input
+					type="password"
+					value={String(value)}
+					onChange={(event) =>
+						onChange(
+							descriptor.key,
+							event.target.value as ApplicationSettings[typeof descriptor.key],
+						)
+					}
+					className="h-8 w-full rounded-lg border border-border-500 bg-panel-600 px-3 text-sm text-foreground outline-none transition-colors hover:border-border-300 focus:border-sky-500"
+					placeholder={descriptor.placeholder}
+					autoComplete="off"
+					spellCheck={false}
+				/>
+			);
 		default:
 			return (
 				<input

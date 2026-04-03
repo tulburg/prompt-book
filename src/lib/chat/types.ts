@@ -3,6 +3,7 @@ import type {
 	NativeToolDefinition,
 	JsonObject,
 } from "./tools/tool-types";
+import type { ChatModelProvider } from "./chat-models";
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
@@ -107,14 +108,14 @@ export interface AnthropicRequest {
 	system: string[];
 	messages: ChatApiMessage[];
 	stream: boolean;
-	format: "anthropic" | "openai" | "qwen" | "gemma";
+	format: "anthropic" | "openai" | "qwen" | "gemma" | "gemini";
 	tools?: NativeToolDefinition[];
 	tool_choice?: "auto" | "none";
 	nativeToolCalling?: boolean;
 	metadata: {
 		sessionId: string;
 		mode: ChatMode;
-		provider: "llama";
+		provider: ChatModelProvider;
 	};
 }
 

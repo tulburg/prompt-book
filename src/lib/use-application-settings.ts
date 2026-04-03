@@ -42,7 +42,11 @@ function createSettingsFileState(
 	};
 }
 
-export function useApplicationSettings() {
+export type ApplicationSettingsController = ReturnType<
+	typeof useApplicationSettingsController
+>;
+
+function useApplicationSettingsController() {
 	const settingsBridge = React.useMemo(() => getSettingsBridge(), []);
 	const [settings, setSettings] = React.useState<ApplicationSettings | null>(null);
 	const [savedSettings, setSavedSettings] =
@@ -226,4 +230,30 @@ export function useApplicationSettings() {
 		settingsJson: settingsFile?.content ?? "",
 		updateSetting,
 	};
+}
+
+const ApplicationSettingsContext =
+	React.createContext<ApplicationSettingsController | null>(null);
+
+export function ApplicationSettingsProvider({
+	children,
+}: {
+	children: React.ReactNode;
+}) {
+	const value = useApplicationSettingsController();
+	return React.createElement(
+		ApplicationSettingsContext.Provider,
+		{ value },
+		children,
+	);
+}
+
+export function useApplicationSettings() {
+	const context = React.useContext(ApplicationSettingsContext);
+	if (!context) {
+		throw new Error(
+			"useApplicationSettings must be used within ApplicationSettingsProvider.",
+		);
+	}
+	return context;
 }

@@ -4,7 +4,7 @@ export interface ChatModelProfileInput {
 }
 
 export interface ChatModelProfile {
-	id: "anthropic" | "openai" | "qwen" | "gemma" | "default";
+	id: "anthropic" | "openai" | "qwen" | "gemma" | "gemini" | "default";
 	modelFamilies?: readonly string[];
 	exactModelIds?: readonly string[];
 	modelNameTokens?: readonly string[];
@@ -61,6 +61,20 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		httpRolePattern: "alternatingUserAssistant",
 		systemSeparator: "\n\n",
 		nativeToolCalling: "supported",
+	},
+	{
+		id: "gemini",
+		modelFamilies: ["google"],
+		modelNameTokens: ["gemini"],
+		contextStyle: "plain_sections",
+		injectUserContext: false,
+		collapseSystemSections: false,
+		insertToolGuidance: true,
+		insertThinkingGuidance: true,
+		toolResultMode: "user",
+		httpRolePattern: "openai",
+		systemSeparator: "\n\n",
+		nativeToolCalling: "unsupported",
 	},
 	{
 		id: "anthropic",

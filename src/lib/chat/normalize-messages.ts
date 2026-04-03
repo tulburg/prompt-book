@@ -2,6 +2,7 @@ import type { ChatApiMessage, ChatToolResultRecord, ChatTranscriptEntry } from "
 
 type NormalizeOptions = {
 	toolResultMode?: "tool" | "user";
+	toolInvocationMode?: "api" | "text";
 };
 
 type NormalizedMessage = {
@@ -29,6 +30,16 @@ function toApiMessage(
 	options: NormalizeOptions,
 ): NormalizedMessage | null {
 	if (entry.subtype === "tool_use" && entry.toolInvocation) {
+		if (options.toolInvocationMode === "text") {
+			return {
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: entry.content.trim() }],
+				},
+				canMergeWithPrevious: false,
+			};
+		}
+
 		return {
 			message: {
 				role: "assistant",

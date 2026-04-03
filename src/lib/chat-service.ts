@@ -2,9 +2,11 @@ import { resolveChatModelProfile } from "./chat/model-profiles";
 import { buildQueryContext } from "./chat/query-context";
 import { buildAnthropicRequest } from "./chat/request-builder";
 import { ChatSessionStore, createTranscriptEntry } from "./chat/session-store";
+import type { ChatModelInfo } from "./chat/chat-models";
 import { executeToolCalls } from "./chat/tools/tool-orchestration";
 import { createToolContext } from "./chat/tools/tool-runtime";
 import type { JsonObject } from "./chat/tools/tool-types";
+import { GeminiChatAdapter } from "./chat/transports/gemini-adapter";
 import { LlamaChatAdapter } from "./chat/transports/llama-adapter";
 import type {
 	ChatMessage,
@@ -13,10 +15,8 @@ import type {
 	ChatTranscriptEntry,
 	ChatUiEvent,
 } from "./chat/types";
-import {
-	type LlamaInstalledModelInfo,
-	llamaServerService,
-} from "./server-service";
+import type { ApplicationSettings } from "./application-settings";
+import { llamaServerService } from "./server-service";
 
 type Listener<T> = (value: T) => void;
 
@@ -110,9 +110,11 @@ export class ChatService {
 	);
 
 	private readonly store = new ChatSessionStore();
-	private readonly transport = new LlamaChatAdapter();
-	private _currentModel: LlamaInstalledModelInfo | null = null;
+	private readonly llamaTransport = new LlamaChatAdapter();
+	private readonly geminiTransport = new GeminiChatAdapter();
+	private _currentModel: ChatModelInfo | null = null;
 	private _abortController: AbortController | null = null;
+	private _stopRequested = false;
 	private _streamingSessionId: string | null = null;
 	private _isSending = false;
 	private _queuedMessages: Array<{
@@ -120,6 +122,7 @@ export class ChatService {
 		options?: {
 			serverUrl?: string;
 			mode?: ChatMode;
+			settings?: ApplicationSettings | null;
 		};
 		resolve: () => void;
 		reject: (error: unknown) => void;
@@ -137,7 +140,7 @@ export class ChatService {
 		return this.store.getActiveSnapshot();
 	}
 
-	get currentModel(): LlamaInstalledModelInfo | null {
+	get currentModel(): ChatModelInfo | null {
 		return this._currentModel;
 	}
 
@@ -145,7 +148,7 @@ export class ChatService {
 		return this._streamingSessionId;
 	}
 
-	set currentModel(model: LlamaInstalledModelInfo | null) {
+	set currentModel(model: ChatModelInfo | null) {
 		this._currentModel = model;
 		const active = this.activeSession;
 		if (!active) return;
@@ -204,6 +207,7 @@ export class ChatService {
 		options?: {
 			serverUrl?: string;
 			mode?: ChatMode;
+			settings?: ApplicationSettings | null;
 		},
 	): Promise<void> {
 		return new Promise<void>((resolve, reject) => {
@@ -221,6 +225,7 @@ export class ChatService {
 		options?: {
 			serverUrl?: string;
 			mode?: ChatMode;
+			settings?: ApplicationSettings | null;
 		},
 	): Promise<void> {
 		let session = this.store.ensureSession(this._currentModel?.id ?? null);
@@ -230,10 +235,12 @@ export class ChatService {
 
 		const resolvedModel =
 			this._currentModel?.id ?? session.modelId ?? "default";
+		const resolvedProvider = this._currentModel?.provider ?? "llama";
 		console.log("[ChatService] sendMessage:", {
 			content: content.slice(0, 80),
 			currentModelId: this._currentModel?.id ?? null,
 			currentModelName: this._currentModel?.displayName ?? null,
+			currentProvider: this._currentModel?.provider ?? null,
 			sessionModelId: session.modelId,
 			resolvedModel,
 			mode: session.mode,
@@ -248,8 +255,28 @@ export class ChatService {
 		});
 		session = this.commitEntry(session.id, userMessage) ?? session;
 
+		if (this._stopRequested) {
+			this._stopRequested = false;
+			this.commitEntry(
+				session.id,
+				createTranscriptEntry({
+					role: "system",
+					content: "[Request interrupted by user]",
+					visibility: "visible",
+					includeInHistory: false,
+					isMeta: true,
+					subtype: "interruption",
+				}),
+			);
+			return;
+		}
+
 		const abortController = new AbortController();
 		this._abortController = abortController;
+		if (this._stopRequested) {
+			abortController.abort();
+			this._stopRequested = false;
+		}
 		this._streamingSessionId = session.id;
 		this._onDidStreamEvent.fire({
 			type: "stream_request_start",
@@ -259,6 +286,9 @@ export class ChatService {
 		const MAX_TOOL_ITERATIONS = 30;
 		const MAX_STREAM_RETRIES = 2;
 		try {
+			if (abortController.signal.aborted) {
+				throw new DOMException("Aborted", "AbortError");
+			}
 			let iteration = 0;
 			for (; iteration < MAX_TOOL_ITERATIONS; iteration++) {
 				console.log(`[ChatService] Tool loop iteration ${iteration + 1}/${MAX_TOOL_ITERATIONS}, session=${session.id}`);
@@ -291,6 +321,7 @@ export class ChatService {
 					queryContext,
 					model: resolvedModel,
 					modelName: this._currentModel?.displayName,
+					provider: resolvedProvider,
 					toolContext,
 				});
 
@@ -304,9 +335,10 @@ export class ChatService {
 						await new Promise((r) => setTimeout(r, streamAttempt * 2000));
 					}
 					try {
-						for await (const event of this.transport.stream(request, {
+						for await (const event of this.streamModelResponse(request, {
 							serverUrl: options?.serverUrl,
 							signal: abortController.signal,
+							settings: options?.settings,
 						})) {
 							if (event.type === "content_delta") {
 								assistantContent += event.text;
@@ -338,6 +370,9 @@ export class ChatService {
 							throw streamError;
 						}
 					}
+				}
+				if (abortController.signal.aborted) {
+					throw new DOMException("Aborted", "AbortError");
 				}
 				if (!streamSucceeded) break;
 
@@ -380,6 +415,7 @@ export class ChatService {
 					toolContext,
 				);
 				console.log(`[ChatService] Tool execution done (iteration ${iteration + 1}), results:`, executed.map((e) => ({ tool: e.call.name, isError: e.result.isError, contentLen: e.result.content.length })));
+				let shouldPauseAfterTools = false;
 				for (const item of executed) {
 					this.commitEntry(
 						session.id,
@@ -415,9 +451,16 @@ export class ChatService {
 							},
 						}),
 					);
+					shouldPauseAfterTools = shouldPauseAfterTools || item.result.pauseAfter === true;
 				}
 
 				session = this.store.getSnapshot(session.id) ?? session;
+				if (shouldPauseAfterTools) {
+					console.log(
+						`[ChatService] Pausing tool loop after tool result (iteration ${iteration + 1}), session=${session.id}`,
+					);
+					break;
+				}
 			}
 
 			if (iteration >= MAX_TOOL_ITERATIONS) {
@@ -456,7 +499,7 @@ export class ChatService {
 					session.id,
 					createTranscriptEntry({
 						role: "assistant",
-						content: `Error: ${errMsg}`,
+						content: errMsg,
 						visibility: "visible",
 						includeInHistory: false,
 						subtype: "error",
@@ -472,6 +515,7 @@ export class ChatService {
 			if (this._abortController === abortController) {
 				this._abortController = null;
 			}
+			this._stopRequested = false;
 			this._streamingSessionId = null;
 		}
 	}
@@ -481,6 +525,7 @@ export class ChatService {
 		options?: {
 			serverUrl?: string;
 			mode?: ChatMode;
+			settings?: ApplicationSettings | null;
 		};
 		resolve: () => void;
 		reject: (error: unknown) => void;
@@ -501,8 +546,33 @@ export class ChatService {
 		}
 	}
 
+	private streamModelResponse(
+		request: ReturnType<typeof buildAnthropicRequest>,
+		options: {
+			serverUrl?: string;
+			signal: AbortSignal;
+			settings?: ApplicationSettings | null;
+		},
+	) {
+		if (request.metadata.provider === "google") {
+			return this.geminiTransport.stream(request, {
+				signal: options.signal,
+				apiKey: options.settings?.["chat.providers.google.apiKey"],
+			});
+		}
+
+		return this.llamaTransport.stream(request, {
+			signal: options.signal,
+			serverUrl: options.serverUrl,
+		});
+	}
+
 	stopGeneration(): void {
-		this._abortController?.abort();
+		if (this._abortController) {
+			this._abortController.abort();
+		} else if (this._isSending) {
+			this._stopRequested = true;
+		}
 		this._abortController = null;
 	}
 

@@ -220,14 +220,14 @@ export default function App() {
 							/>
 						),
 					},
-				{
-					id: "chat",
-					minSize: 200,
-					defaultSize: 25,
-					children: (
-						<ChatPanel onOpenFileAtLine={handleOpenFileAtLine} />
-					),
-				},
+					{
+						id: "chat",
+						minSize: 200,
+						defaultSize: 25,
+						children: (
+							<ChatPanel onOpenFileAtLine={handleOpenFileAtLine} />
+						),
+					},
 				]}
 			/>
 		</div>

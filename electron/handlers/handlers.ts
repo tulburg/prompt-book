@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { spawn, spawnSync } from "node:child_process";
+import { accessSync, constants as fsConstants, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildLlamaServerArgs } from "./llama-config";
@@ -55,7 +56,7 @@ function resolveLlamaBinaryPath(): string | undefined {
 
   for (const candidate of candidates) {
     try {
-      require("fs").accessSync(candidate, require("fs").constants.X_OK);
+      accessSync(candidate, fsConstants.X_OK);
       return candidate;
     } catch {
       // try next
@@ -110,7 +111,7 @@ async function startManagedLlamaServer(serverUrl: string): Promise<void> {
 
   const modelsDir = getLocalModelsDir();
   try {
-    require("fs").mkdirSync(modelsDir, { recursive: true });
+    mkdirSync(modelsDir, { recursive: true });
   } catch (error) {
     console.warn("[LlamaServer] Failed to ensure local models dir:", modelsDir, error);
   }

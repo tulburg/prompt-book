@@ -1,6 +1,7 @@
-export type LlamaServerStatus = "stopped" | "starting" | "running" | "error";
-
+import type { ChatModelInfo } from "./chat/chat-models";
 import type { DownloadedModelArtifact, PullProgressEvent } from "./model-downloads";
+
+export type LlamaServerStatus = "stopped" | "starting" | "running" | "error";
 
 export function normalizePullModelId(modelId: string, quantization?: string): string {
 	let normalized = modelId.trim();
@@ -14,9 +15,8 @@ export function normalizePullModelId(modelId: string, quantization?: string): st
 	return normalized;
 }
 
-export interface LlamaInstalledModelInfo {
-	id: string;
-	displayName: string;
+export interface LlamaInstalledModelInfo extends ChatModelInfo {
+	provider: "llama";
 	maxContextLength?: number;
 	vision?: boolean;
 	trainedForToolUse?: boolean;
@@ -153,6 +153,7 @@ export class LlamaServerService {
 				return {
 					id,
 					displayName,
+					provider: "llama",
 					maxContextLength: model.meta?.max_context_length ?? model.meta?.n_ctx_train,
 					vision: model.meta?.multimodal,
 					trainedForToolUse: model.meta?.tools,

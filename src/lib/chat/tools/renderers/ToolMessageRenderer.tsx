@@ -9,6 +9,8 @@ import type {
   ChatToolDisplay,
   ChatToolDisplayDiff,
   ChatToolDisplayFileList,
+  ChatToolDisplayQuestion,
+  ChatToolDisplayTask,
   DiffHunk,
   JsonObject,
 } from "@/lib/chat/tools/tool-types";
@@ -24,6 +26,7 @@ import {
   SquareTerminal,
   FilePlus,
   Bot,
+  CircleX,
 } from "lucide-react";
 
 /* ── Utility helpers ── */
@@ -141,7 +144,17 @@ function getToolIcon(toolName: string): React.ReactNode {
     case "WebFetch":
       return <Globe className={cls} />;
     case "TodoWrite":
+    case "TaskCreate":
+    case "TaskGet":
+    case "TaskList":
+    case "TaskUpdate":
       return <ListChecks className={cls} />;
+    case "AskUserQuestion":
+      return <Sparkles className={cls} />;
+    case "Agent":
+    case "Task":
+    case "TaskOutput":
+      return <Bot className={cls} />;
     case "NotebookEdit":
       return <FilePlus className={cls} />;
     default:
@@ -450,6 +463,141 @@ function TodoListInline({
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function summarizeTodoDisplay(
+  display: Extract<ChatToolDisplay, { kind: "todo_list" }>,
+): string {
+  const completed = display.items.filter((item) => item.status === "completed").length;
+  const inProgress = display.items.find((item) => item.status === "in_progress");
+  if (inProgress) {
+    return `${inProgress.content} (${completed + 1}/${display.items.length})`;
+  }
+  if (display.items.length > 0 && completed === display.items.length) {
+    return `All ${display.items.length} tasks completed`;
+  }
+  return `${display.items.length} task${display.items.length === 1 ? "" : "s"}`;
+}
+
+function QuestionPreview({
+  display,
+}: {
+  display: ChatToolDisplayQuestion;
+}) {
+  return (
+    <div className="space-y-3 px-3 py-2">
+      {display.description && (
+        <div className="text-[12px] text-foreground/75">{display.description}</div>
+      )}
+      {display.questions.map((question, index) => (
+        <div
+          key={question.id}
+          className="rounded-lg border border-border-500/60 bg-panel-600/60 px-3 py-2"
+        >
+          <div className="text-[12px] font-medium text-foreground">
+            {display.questions.length > 1 ? `${index + 1}. ` : ""}
+            {question.prompt}
+          </div>
+          {question.details && (
+            <div className="mt-1 text-[11px] text-foreground/60">
+              {question.details}
+            </div>
+          )}
+          {question.options && question.options.length > 0 ? (
+            <div className="mt-2 space-y-1">
+              {question.options.map((option) => (
+                <div
+                  key={option.id}
+                  className="rounded border border-border-500/50 bg-panel-700 px-2 py-1 text-[11px] text-foreground/80"
+                >
+                  {option.label}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 text-[11px] text-placeholder">
+              {question.responseType === "multi_select"
+                ? "Answer with multiple selections in your next message."
+                : "Answer in your next message."}
+            </div>
+          )}
+        </div>
+      ))}
+      {display.helpText && (
+        <div className="text-[11px] text-placeholder">{display.helpText}</div>
+      )}
+    </div>
+  );
+}
+
+function TaskStatusPill({
+  status,
+}: {
+  status: ChatToolDisplayTask["status"];
+}) {
+  const className =
+    status === "completed"
+      ? "text-green-400 bg-green-500/10"
+      : status === "running" || status === "pending"
+        ? "text-sky bg-sky/10"
+        : "text-amber-300 bg-amber-500/10";
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] ${className}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function TaskPreview({
+  display,
+}: {
+  display: ChatToolDisplayTask;
+}) {
+  return (
+    <div className="space-y-3 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <TaskStatusPill status={display.status} />
+        {display.agentName && (
+          <span className="text-[11px] text-foreground/60">{display.agentName}</span>
+        )}
+      </div>
+      <div className="text-[12px] text-foreground">{display.summary}</div>
+      {display.metadata && display.metadata.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {display.metadata.map((item) => (
+            <span
+              key={`${item.label}:${item.value}`}
+              className="rounded border border-border-500/60 px-2 py-1 text-[10px] text-foreground/65"
+            >
+              {item.label}: {item.value}
+            </span>
+          ))}
+        </div>
+      )}
+      {display.prompt && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-placeholder">
+            Prompt
+          </div>
+          <div className="whitespace-pre-wrap rounded border border-border-500/60 bg-panel-700 px-2 py-2 text-[11px] text-foreground/80">
+            {display.prompt}
+          </div>
+        </div>
+      )}
+      {display.result && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-placeholder">
+            Result
+          </div>
+          <div className="whitespace-pre-wrap rounded border border-border-500/60 bg-panel-700 px-2 py-2 text-[11px] text-foreground/75">
+            {display.result}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -908,25 +1056,40 @@ function buildToolAction(
       };
     }
 
-    case "TodoWrite": {
+    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskGet":
+    case "TaskList":
+    case "TaskUpdate": {
+      const listDisplay = display?.kind === "todo_list" ? display : undefined;
+      const taskSummary = listDisplay ? summarizeTodoDisplay(listDisplay) : "Tasks";
       const todoLabel = isRunning ? (
         <span className="tool-title-shimmer">Updating tasks</span>
       ) : (
-        <span>Updated tasks</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span>
+            {toolName === "TaskList" || toolName === "TaskGet"
+              ? "Viewed tasks"
+              : "Updated tasks"}
+          </span>
+          {listDisplay && (
+            <span className="text-[11px] text-foreground/50">{taskSummary}</span>
+          )}
+        </span>
       );
 
       let preview: React.ReactNode = null;
-      if (display?.kind === "todo_list") {
+      if (listDisplay) {
         preview = (
           <PreviewBox
             stateKey={stateKey}
-            initialState="collapsed"
+            initialState={toolName === "TaskList" ? "peek" : "collapsed"}
             hasExternalToggle
             peekMaxHeight={160}
           >
             {() => (
               <div className="px-3 py-2">
-                <TodoListInline display={display} />
+                <TodoListInline display={listDisplay} />
               </div>
             )}
           </PreviewBox>
@@ -934,8 +1097,79 @@ function buildToolAction(
       }
 
       return {
-        icon: isRunning ? <SpinnerIcon /> : getToolIcon("TodoWrite"),
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon(toolName),
         label: todoLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "AskUserQuestion": {
+      const questionDisplay = display?.kind === "question" ? display : undefined;
+      const questionCount = questionDisplay?.questions.length ?? 0;
+      const label = isRunning ? (
+        <span className="tool-title-shimmer">Preparing question</span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>Asked a question</span>
+          {questionCount > 0 && (
+            <span className="text-[11px] text-foreground/50">
+              {questionCount} item{questionCount === 1 ? "" : "s"}
+            </span>
+          )}
+        </span>
+      );
+
+      const preview = questionDisplay ? (
+        <PreviewBox
+          stateKey={stateKey}
+          initialState="expanded"
+          hasExternalToggle
+          peekMaxHeight={220}
+          expandedMaxHeight={420}
+        >
+          {() => <QuestionPreview display={questionDisplay} />}
+        </PreviewBox>
+      ) : null;
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("AskUserQuestion"),
+        label,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "Agent":
+    case "Task":
+    case "TaskOutput": {
+      const taskDisplay = display?.kind === "task" ? display : undefined;
+      const label = isRunning ? (
+        <span className="tool-title-shimmer">Delegating task</span>
+      ) : taskDisplay ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span>{taskDisplay.title ?? "Task"}</span>
+          <TaskStatusPill status={taskDisplay.status} />
+        </span>
+      ) : (
+        <span>{toolName}</span>
+      );
+
+      const preview = taskDisplay ? (
+        <PreviewBox
+          stateKey={stateKey}
+          initialState="peek"
+          hasExternalToggle
+          peekMaxHeight={220}
+          expandedMaxHeight={420}
+        >
+          {() => <TaskPreview display={taskDisplay} />}
+        </PreviewBox>
+      ) : null;
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon(toolName),
+        label,
         preview,
         previewStateKey: preview ? stateKey : undefined,
       };
@@ -1006,6 +1240,30 @@ function buildToolAction(
             )}
           </PreviewBox>
         );
+      } else if (display?.kind === "question") {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="expanded"
+            hasExternalToggle
+            peekMaxHeight={220}
+            expandedMaxHeight={420}
+          >
+            {() => <QuestionPreview display={display} />}
+          </PreviewBox>
+        );
+      } else if (display?.kind === "task") {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="peek"
+            hasExternalToggle
+            peekMaxHeight={220}
+            expandedMaxHeight={420}
+          >
+            {() => <TaskPreview display={display} />}
+          </PreviewBox>
+        );
       } else if (!display && result?.outputText) {
         preview = (
           <PreviewBox
@@ -1054,6 +1312,18 @@ function summarizeToolInput(
       return (input.query as string) || null;
     case "TodoWrite":
       return "Update tasks";
+    case "TaskCreate":
+    case "TaskGet":
+    case "TaskList":
+    case "TaskUpdate":
+      return "Tasks";
+    case "AskUserQuestion":
+      return (input.title as string) || (input.prompt as string) || "Question";
+    case "Agent":
+    case "Task":
+      return (input.description as string) || (input.prompt as string) || "Delegated task";
+    case "TaskOutput":
+      return (input.task_id as string) || (input.agent_id as string) || "Task output";
     default:
       return null;
   }
@@ -1124,7 +1394,7 @@ export function ToolMessageRenderer({
         label={action.label}
         isLast={isLast}
         onOpenFileAtLine={action.filePath ? onOpenFileAtLine : undefined}
-        filePath={undefined}
+        filePath={action.filePath}
         fileLine={action.fileLine}
         previewStateKey={action.previewStateKey}
       >
@@ -1150,7 +1420,7 @@ export function ToolMessageRenderer({
         label={action.label}
         isLast={isLast}
         onOpenFileAtLine={action.filePath ? onOpenFileAtLine : undefined}
-        filePath={undefined}
+        filePath={action.filePath}
         fileLine={action.fileLine}
         previewStateKey={action.previewStateKey}
       >
@@ -1239,6 +1509,33 @@ export function AssistantTimelineRow({
         <Bot className="size-4 text-foreground" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col pb-3">{children}</div>
+    </div>
+  );
+}
+
+export function ErrorTimelineRow({
+  message,
+  isLast = false,
+}: {
+  message: string;
+  isLast?: boolean;
+}) {
+  return (
+    <div className="relative flex gap-3 pb-0.5">
+      {!isLast && (
+        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
+      )}
+      <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center">
+        <CircleX className="size-4 text-red-400" />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 pb-3">
+        <div className="text-[12.5px] text-red-300">Request failed</div>
+        <div className="rounded-xl border border-red-500/25 bg-red-500/8 px-3 py-2">
+          <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
+            {message}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

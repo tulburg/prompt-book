@@ -3,9 +3,17 @@ import {
   type ChatSession,
   chatService,
 } from "@/lib/chat-service";
+import {
+  getChatModelProviderLabel,
+  getConfiguredFrontierModels,
+  isLocalChatModel,
+  type ChatModelInfo,
+} from "@/lib/chat/chat-models";
+import { useApplicationSettings } from "@/lib/use-application-settings";
 import { parseAssistantRenderableContent } from "@/lib/chat/render-message-content";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import {
+  ErrorTimelineRow,
   ToolMessageRenderer,
   ThinkingTimelineRow,
   WorkingTimelineRow,
@@ -22,6 +30,7 @@ import {
   type LlamaInstalledModelInfo,
   llamaServerService,
 } from "@/lib/server-service";
+import Bus from "@/lib/bus";
 import { buildToolMessagePairingIndex } from "@/ui/higher/tool-message-pairing";
 import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
 import { Modal } from "@/ui/lower/Modal";
@@ -46,7 +55,11 @@ interface ChatPanelProps {
   onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
 }
 
-export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
+export function ChatPanel({
+  className,
+  onOpenFileAtLine,
+}: ChatPanelProps) {
+  const { settings } = useApplicationSettings();
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
     null,
@@ -56,8 +69,9 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
   const [installedModels, setInstalledModels] = React.useState<
     LlamaInstalledModelInfo[]
   >([]);
-  const [selectedModel, setSelectedModel] =
-    React.useState<LlamaInstalledModelInfo | null>(null);
+  const [selectedModel, setSelectedModel] = React.useState<ChatModelInfo | null>(
+    null,
+  );
   const [serverStatus, setServerStatus] = React.useState<
     "stopped" | "starting" | "running" | "error"
   >("stopped");
@@ -89,6 +103,14 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
   const modelButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
   const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
+  const remoteModels = React.useMemo(
+    () => getConfiguredFrontierModels(settings),
+    [settings],
+  );
+  const availableModels = React.useMemo(
+    () => [...installedModels, ...remoteModels],
+    [installedModels, remoteModels],
+  );
 
   React.useEffect(() => {
     const checkServer = async () => {
@@ -98,18 +120,8 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
         llamaServerService.startHeartbeat();
         const models = await chatService.getInstalledModels();
         setInstalledModels(models);
-        if (models.length > 0 && !selectedModel) {
-          setSelectedModel(models[0]);
-          chatService.currentModel = models[0];
-          setIsLoadingModel(true);
-          try {
-            await llamaServerService.loadModel(models[0].id);
-          } catch (error) {
-            console.error("Failed to load initial model:", error);
-          } finally {
-            setIsLoadingModel(false);
-          }
-        }
+      } else {
+        setServerStatus("stopped");
       }
     };
     checkServer();
@@ -211,7 +223,66 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       }
       downloadDismissTimersRef.current.clear();
     };
-  }, [selectedModel]);
+  }, []);
+
+  React.useEffect(() => {
+    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
+    const nextSelectedModel =
+      (preferredModelId
+        ? availableModels.find((model) => model.id === preferredModelId)
+        : null) ??
+      availableModels[0] ??
+      null;
+
+    if (
+      nextSelectedModel &&
+      nextSelectedModel.id === selectedModel?.id &&
+      nextSelectedModel.provider === selectedModel?.provider
+    ) {
+      return;
+    }
+
+    if (!nextSelectedModel) {
+      if (selectedModel) {
+        setSelectedModel(null);
+      }
+      chatService.currentModel = null;
+      return;
+    }
+
+    setSelectedModel(nextSelectedModel);
+    chatService.currentModel = nextSelectedModel;
+  }, [activeSession?.modelId, availableModels, selectedModel]);
+
+  React.useEffect(() => {
+    if (!selectedModel || !isLocalChatModel(selectedModel)) {
+      setIsLoadingModel(false);
+      return;
+    }
+    if (serverStatus !== "running") {
+      setIsLoadingModel(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingModel(true);
+    void llamaServerService
+      .loadModel(selectedModel.id)
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("[ChatPanel] Failed to load selected model:", error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingModel(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedModel?.id, selectedModel?.provider, serverStatus]);
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -260,7 +331,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       textareaRef.current.style.height = "auto";
     }
 
-    await chatService.sendMessage(trimmed, { mode: chatMode });
+    await chatService.sendMessage(trimmed, { mode: chatMode, settings });
   };
 
   const handleStopGeneration = () => {
@@ -291,22 +362,16 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
     setStreamingText(null);
   };
 
-  const handleSelectModel = async (model: LlamaInstalledModelInfo) => {
-    console.log("[ChatPanel] handleSelectModel:", model.id, model.displayName);
+  const handleSelectModel = (model: ChatModelInfo) => {
+    console.log(
+      "[ChatPanel] handleSelectModel:",
+      model.provider,
+      model.id,
+      model.displayName,
+    );
     setSelectedModel(model);
     chatService.currentModel = model;
     setShowModelPicker(false);
-    setIsLoadingModel(true);
-    try {
-      console.log("[ChatPanel] calling loadModel...");
-      await llamaServerService.loadModel(model.id);
-      console.log("[ChatPanel] loadModel done ✓");
-    } catch (error) {
-      console.error("[ChatPanel] Failed to load model:", error);
-    } finally {
-      setIsLoadingModel(false);
-      console.log("[ChatPanel] isLoadingModel → false");
-    }
   };
 
   const handleDownloadModel = async (entry: LlamaModelEntry) => {
@@ -371,6 +436,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
   const messages = activeSession?.messages ?? [];
   const visibleStreamingText = streamingText;
   const activeDownloads = Array.from(downloadProgress.values());
+  const hasGoogleGemini = remoteModels.some((model) => model.provider === "google");
   const toolMessagePairing = React.useMemo(
     () => buildToolMessagePairingIndex(messages),
     [messages],
@@ -532,20 +598,45 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                     }}
                   >
                     {installedModels.length > 0 ? (
-                      installedModels.map((model) => (
-                        <button
-                          key={model.id}
-                          className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
-                          onClick={() => handleSelectModel(model)}
-                        >
-                          <span>{model.displayName}</span>
-                        </button>
-                      ))
-                    ) : (
+                      <>
+                        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-placeholder">
+                          Local
+                        </div>
+                        {installedModels.map((model) => (
+                          <button
+                            key={model.id}
+                            className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
+                            onClick={() => handleSelectModel(model)}
+                          >
+                            <span>{model.displayName}</span>
+                          </button>
+                        ))}
+                      </>
+                    ) : null}
+                    {remoteModels.length > 0 ? (
+                      <>
+                        {installedModels.length > 0 && (
+                          <div className="my-1 h-px bg-border-500" />
+                        )}
+                        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-placeholder">
+                          Frontier
+                        </div>
+                        {remoteModels.map((model) => (
+                          <button
+                            key={model.id}
+                            className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
+                            onClick={() => handleSelectModel(model)}
+                          >
+                            <span>{model.displayName}</span>
+                          </button>
+                        ))}
+                      </>
+                    ) : null}
+                    {availableModels.length === 0 ? (
                       <div className="p-2 text-center text-xs text-placeholder">
-                        No models installed
+                        No chat models available
                       </div>
-                    )}
+                    ) : null}
                     <div className="my-1 h-px bg-border-500" />
                     <button
                       className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
@@ -554,6 +645,17 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                       <Download className="mr-2 h-3.5 w-3.5" />
                       Add Local Model...
                     </button>
+                    {!hasGoogleGemini && (
+                        <button
+                        className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
+                        onClick={() => {
+                          setShowModelPicker(false);
+                          Bus.emit("settings:open", undefined);
+                        }}
+                        >
+                        Configure Google Gemini...
+                        </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -583,7 +685,11 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
         <div className="py-0.5">
           <button className="flex cursor-pointer items-center gap-1 rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:text-foreground">
             <span className="text-sm">&#9633;</span>
-            <span>Local</span>
+            <span>
+              {selectedModel
+                ? getChatModelProviderLabel(selectedModel.provider)
+                : "Local"}
+            </span>
             <ChevronDown className="h-3 w-3" />
           </button>
         </div>
@@ -593,7 +699,8 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       <div className="order-1 min-h-0 flex-1 overflow-y-auto text-foreground">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
-            {serverStatus !== "running" && (
+            {(!selectedModel || isLocalChatModel(selectedModel)) &&
+              serverStatus !== "running" && (
               <div className="flex flex-col items-center gap-2">
                 {serverStatus === "stopped" && (
                   <>
@@ -610,14 +717,6 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                         if (models.length > 0) {
                           setSelectedModel(models[0]);
                           chatService.currentModel = models[0];
-                          setIsLoadingModel(true);
-                          try {
-                            await llamaServerService.loadModel(models[0].id);
-                          } catch (error) {
-                            console.error("Failed to load model:", error);
-                          } finally {
-                            setIsLoadingModel(false);
-                          }
                         }
                       }}
                     >
@@ -822,7 +921,11 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       <div className="shrink-0 border-t border-border-500 px-4 py-2">
         <div className="flex items-center gap-1.5 text-xs text-placeholder">
           <span className="text-sm text-sky-700">&#9673;</span>
-          <span>Local model</span>
+          <span>
+            {selectedModel
+              ? getChatModelProviderLabel(selectedModel.provider)
+              : "No model selected"}
+          </span>
         </div>
       </div>
     </div>
@@ -992,6 +1095,10 @@ function AssistantMessageContent({
   );
 }
 
+function formatErrorMessage(content: string): string {
+  return content.replace(/^Error:\s*/i, "").trim();
+}
+
 function ChatMessageItem({
   message,
   onOpenFileAtLine,
@@ -1006,20 +1113,20 @@ function ChatMessageItem({
   isLast?: boolean;
 }) {
   const isUser = message.role === "user";
+  const isErrorMessage = message.subtype === "error";
   const isNotice =
-    message.role === "system" ||
-    message.subtype === "error" ||
-    message.subtype === "interruption";
+    message.role === "system" || message.subtype === "interruption";
   const isToolMessage =
     message.subtype === "tool_use" || message.subtype === "tool_result";
-  const isAssistantText = !isUser && !isToolMessage && !isNotice;
+  const isAssistantText =
+    !isUser && !isToolMessage && !isNotice && !isErrorMessage;
 
   return (
     <div
-      className={`flex cursor-default select-text flex-col px-4 ${isUser ? "items-end py-1.5" : isToolMessage ? "py-0" : isAssistantText ? "py-0" : "py-1.5"}`}
+      className={`flex cursor-default select-text flex-col px-4 ${isUser ? "items-end py-1.5" : isToolMessage ? "py-0" : isAssistantText || isErrorMessage ? "py-0" : "py-1.5"}`}
     >
       <div
-        className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "pl-0.5" : isAssistantText ? "pl-0.5" : ""}`}
+        className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "pl-0.5" : isAssistantText || isErrorMessage ? "pl-0.5" : ""}`}
       >
         {isToolMessage ? (
           <ToolMessageRenderer
@@ -1027,6 +1134,11 @@ function ChatMessageItem({
             onOpenFileAtLine={onOpenFileAtLine}
             pairedResult={pairedResult}
             isLast={isLastTool}
+          />
+        ) : isErrorMessage ? (
+          <ErrorTimelineRow
+            message={formatErrorMessage(message.content)}
+            isLast={isLast}
           />
         ) : message.isStreaming && !message.content ? (
           <WorkingTimelineRow text="Working..." isLast />

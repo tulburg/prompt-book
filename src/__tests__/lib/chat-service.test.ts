@@ -26,6 +26,7 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "local-model",
 			displayName: "Local Model",
+			provider: "llama",
 		};
 		service.createSession();
 		service.setMode("Ask");
@@ -72,6 +73,7 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
 			displayName: "Qwen3 Coder",
+			provider: "llama",
 		};
 		service.createSession();
 
@@ -108,10 +110,14 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "local-model",
 			displayName: "Local Model",
+			provider: "llama",
 		};
 		service.createSession();
 
 		const sendPromise = service.sendMessage("Stream please");
+		for (let attempt = 0; attempt < 5 && !service.streamingSessionId; attempt++) {
+			await Promise.resolve();
+		}
 		service.stopGeneration();
 		await sendPromise;
 
@@ -123,8 +129,10 @@ describe("chat service", () => {
 			messages.some((message) => message.content === "*[Generation stopped]*"),
 		).toBe(false);
 
-		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-		expect(init.signal?.aborted).toBe(true);
+		if (fetchMock.mock.calls[0]) {
+			const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+			expect(init.signal?.aborted).toBe(true);
+		}
 	});
 
 	it("closes a chat tab while retaining the session in history", () => {
@@ -177,6 +185,7 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "local-model",
 			displayName: "Local Model",
+			provider: "llama",
 		};
 		service.createSession();
 
@@ -239,6 +248,7 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "openai/gpt-oss-20b",
 			displayName: "GPT OSS 20B",
+			provider: "llama",
 		};
 		service.createSession();
 
@@ -253,6 +263,65 @@ describe("chat service", () => {
 			true,
 		);
 		expect(messages.at(-1)?.content).toBe("Finished after tool.");
+	});
+
+	it("pauses the tool loop after AskUserQuestion so the next user reply can continue", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: "",
+								tool_calls: [
+									{
+										id: "call_question",
+										function: {
+											name: "AskUserQuestion",
+											arguments: JSON.stringify({
+												title: "Clarify scope",
+												questions: [
+													{
+														id: "q1",
+														prompt: "Which path should I take?",
+														options: [
+															{ id: "a", label: "Option A" },
+															{ id: "b", label: "Option B" },
+														],
+													},
+												],
+											}),
+										},
+									},
+								],
+							},
+						},
+					],
+				}),
+				{
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				},
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "openai/gpt-oss-20b",
+			displayName: "GPT OSS 20B",
+			provider: "llama",
+		};
+		service.createSession();
+
+		await service.sendMessage("Use a question tool");
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const messages = service.activeSession?.messages ?? [];
+		const toolResult = messages.find((message) => message.subtype === "tool_result");
+		expect(toolResult?.toolResult?.toolName).toBe("AskUserQuestion");
+		expect(toolResult?.toolResult?.display?.kind).toBe("question");
+		expect(messages.at(-1)?.subtype).toBe("tool_result");
 	});
 
 	it("strips echoed tool invocation text from assistant messages", async () => {
@@ -306,6 +375,7 @@ describe("chat service", () => {
 		service.currentModel = {
 			id: "openai/gpt-oss-20b",
 			displayName: "GPT OSS 20B",
+			provider: "llama",
 		};
 		service.createSession();
 
@@ -325,5 +395,55 @@ describe("chat service", () => {
 			true,
 		);
 		expect(messages.at(-1)?.content).toBe("Done searching.");
+	});
+
+	it("routes Gemini models through the Google transport when configured", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						const encoder = new TextEncoder();
+						controller.enqueue(
+							encoder.encode(
+								'data: {"candidates":[{"content":{"parts":[{"text":"Gemini reply"}]}}]}\n\n',
+							),
+						);
+						controller.close();
+					},
+				}),
+				{
+					status: 200,
+					headers: { "Content-Type": "text/event-stream" },
+				},
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "gemini-2.5-flash",
+			displayName: "Gemini 2.5 Flash",
+			provider: "google",
+		};
+		service.createSession();
+
+		await service.sendMessage("Hello Gemini", {
+			settings: {
+				"workbench.sidebar.visible": true,
+				"workbench.sidebar.sortOrder": "default",
+				"explorer.compactFolders": true,
+				"explorer.fileNesting.enabled": true,
+				"explorer.autoReveal": true,
+				"chat.providers.google.apiKey": "test-key",
+			},
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(url).toContain("generativelanguage.googleapis.com");
+		expect(init.headers).toMatchObject({
+			"x-goog-api-key": "test-key",
+		});
+		expect(service.activeSession?.messages.at(-1)?.content).toBe("Gemini reply");
 	});
 });

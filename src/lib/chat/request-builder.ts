@@ -5,6 +5,7 @@ import { buildToolInstructionSections } from "./tools/tool-instructions";
 import { getAvailableChatTools, getNativeToolDefinitions } from "./tools/tool-registry";
 import { supportsNativeToolCalling } from "./tools/tool-capabilities";
 import type { ChatToolContext } from "./tools/tool-types";
+import type { ChatModelProvider } from "./chat-models";
 
 function serializeContext(
 	tagName: "system-reminder" | "system-context",
@@ -119,18 +120,21 @@ export function buildAnthropicRequest({
 	model,
 	modelName,
 	toolContext,
+	provider,
 }: {
 	session: ChatSessionState;
 	queryContext: ChatQueryContext;
 	model: string;
 	modelName?: string | null;
 	toolContext?: ChatToolContext;
+	provider: ChatModelProvider;
 }): AnthropicRequest {
 	const profile = resolveChatModelProfile({ modelId: model, modelName });
+	const nativeToolCalling = Boolean(toolContext) && supportsNativeToolCalling(profile);
 	const normalizedMessages = normalizeMessagesForAnthropic(session.transcript, {
+		toolInvocationMode: nativeToolCalling ? "api" : "text",
 		toolResultMode: profile.toolResultMode,
 	});
-	const nativeToolCalling = Boolean(toolContext) && supportsNativeToolCalling(profile);
 	const tools = toolContext && nativeToolCalling ? getNativeToolDefinitions(toolContext) : undefined;
 	console.log("[RequestBuilder] resolved profile:", { modelId: model, modelName, profileId: profile.id, contextStyle: profile.contextStyle, injectUserContext: profile.injectUserContext, toolResultMode: profile.toolResultMode, nativeToolCalling, toolCount: tools?.length ?? 0 });
 
@@ -142,7 +146,10 @@ export function buildAnthropicRequest({
 		format:
 			profile.id === "anthropic" || profile.id === "default"
 				? "anthropic"
-				: profile.id === "openai" || profile.id === "qwen" || profile.id === "gemma"
+				: profile.id === "openai" ||
+					  profile.id === "qwen" ||
+					  profile.id === "gemma" ||
+					  profile.id === "gemini"
 					? profile.id
 					: "anthropic",
 		tools,
@@ -151,7 +158,7 @@ export function buildAnthropicRequest({
 		metadata: {
 			sessionId: session.id,
 			mode: session.mode,
-			provider: "llama",
+			provider,
 		},
 	};
 }
