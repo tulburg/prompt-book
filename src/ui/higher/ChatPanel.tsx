@@ -95,6 +95,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       const healthy = await llamaServerService.isServerHealthy();
       if (healthy) {
         setServerStatus("running");
+        llamaServerService.startHeartbeat();
         const models = await chatService.getInstalledModels();
         setInstalledModels(models);
         if (models.length > 0 && !selectedModel) {
@@ -115,6 +116,21 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
 
     const unsubStatus = llamaServerService.onDidChangeStatus((status) => {
       setServerStatus(status);
+      if (status === "running") {
+        llamaServerService.startHeartbeat();
+      } else {
+        llamaServerService.stopHeartbeat();
+      }
+    });
+
+    const unsubRecover = llamaServerService.onDidRecover(async () => {
+      console.info("[ChatPanel] Server recovered, refreshing model list");
+      try {
+        const models = await chatService.getInstalledModels();
+        setInstalledModels(models);
+      } catch (error) {
+        console.error("[ChatPanel] Failed to refresh models after recovery:", error);
+      }
     });
 
     const unsubSession = chatService.onDidUpdateSession(() => {
@@ -132,10 +148,9 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
 
     const unsubStream = chatService.onDidStreamEvent((event) => {
       handleChatStreamEvent(event, {
-        onMessage: ({ sessionId }) => {
-          if (sessionId !== activeSessionIdRef.current) return;
-          setStreamingText(null);
-          setIsStreaming(false);
+        onMessage: () => {
+          // Message list updates are handled by onDidUpdateSession.
+          // Do NOT set isStreaming here — the tool loop may still be running.
         },
         onSetStreamMode: (mode) => {
           if (event.sessionId !== activeSessionIdRef.current) return;
@@ -186,9 +201,11 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
 
     return () => {
       unsubStatus();
+      unsubRecover();
       unsubSession();
       unsubStream();
       unsubPull();
+      llamaServerService.stopHeartbeat();
       for (const timeoutId of downloadDismissTimersRef.current.values()) {
         window.clearTimeout(timeoutId);
       }
@@ -419,8 +436,8 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
         </div>
       </div>
 
-      {/* Input area at top */}
-      <div className="flex shrink-0 flex-col gap-1 px-3 py-2">
+      {/* Input area at bottom */}
+      <div className="order-2 flex shrink-0 flex-col gap-1 border-t border-border-500 px-3 py-2">
         <div className="relative box-border w-full cursor-text rounded-[10px] border border-border-500 bg-panel-600 px-1.5 pb-1.5 focus-within:border-sky">
           <textarea
             ref={textareaRef}
@@ -490,7 +507,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                       const rect =
                         modelButtonRef.current.getBoundingClientRect();
                       setModelPickerPos({
-                        top: rect.bottom + 4,
+                        top: rect.top - 8,
                         left: rect.left,
                       });
                     }
@@ -511,6 +528,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                     style={{
                       top: modelPickerPos.top,
                       left: modelPickerPos.left,
+                      transform: "translateY(-100%)",
                     }}
                   >
                     {installedModels.length > 0 ? (
@@ -572,7 +590,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
       </div>
 
       {/* Messages area */}
-      <div className="min-h-0 flex-1 overflow-y-auto text-foreground">
+      <div className="order-1 min-h-0 flex-1 overflow-y-auto text-foreground">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
             {serverStatus !== "running" && (

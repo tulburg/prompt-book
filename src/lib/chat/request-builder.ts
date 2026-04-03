@@ -84,7 +84,9 @@ function buildSystemSections(
 	const availableTools = toolContext ? getAvailableChatTools(toolContext) : [];
 	const toolSections =
 		profile.insertToolGuidance || (toolContext && supportsNativeToolCalling(profile))
-			? buildToolInstructionSections(availableTools)
+			? buildToolInstructionSections(availableTools, {
+					includeThinkingGuidance: profile.insertThinkingGuidance,
+				})
 			: [];
 	const sections =
 		profile.contextStyle === "plain_sections"
@@ -124,11 +126,13 @@ export function buildAnthropicRequest({
 	modelName?: string | null;
 	toolContext?: ChatToolContext;
 }): AnthropicRequest {
-	const normalizedMessages = normalizeMessagesForAnthropic(session.transcript);
 	const profile = resolveChatModelProfile({ modelId: model, modelName });
+	const normalizedMessages = normalizeMessagesForAnthropic(session.transcript, {
+		toolResultMode: profile.toolResultMode,
+	});
 	const nativeToolCalling = Boolean(toolContext) && supportsNativeToolCalling(profile);
 	const tools = toolContext && nativeToolCalling ? getNativeToolDefinitions(toolContext) : undefined;
-	console.log("[RequestBuilder] resolved profile:", { modelId: model, modelName, profileId: profile.id, contextStyle: profile.contextStyle, injectUserContext: profile.injectUserContext, nativeToolCalling, toolCount: tools?.length ?? 0 });
+	console.log("[RequestBuilder] resolved profile:", { modelId: model, modelName, profileId: profile.id, contextStyle: profile.contextStyle, injectUserContext: profile.injectUserContext, toolResultMode: profile.toolResultMode, nativeToolCalling, toolCount: tools?.length ?? 0 });
 
 	return {
 		model,

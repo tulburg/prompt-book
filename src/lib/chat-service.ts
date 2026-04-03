@@ -256,8 +256,12 @@ export class ChatService {
 			sessionId: session.id,
 		});
 
+		const MAX_TOOL_ITERATIONS = 30;
+		const MAX_STREAM_RETRIES = 2;
 		try {
-			for (let iteration = 0; iteration < 8; iteration++) {
+			let iteration = 0;
+			for (; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+				console.log(`[ChatService] Tool loop iteration ${iteration + 1}/${MAX_TOOL_ITERATIONS}, session=${session.id}`);
 				let assistantContent = "";
 				let assistantToolCalls: Array<{
 					id: string;
@@ -290,21 +294,52 @@ export class ChatService {
 					toolContext,
 				});
 
-				for await (const event of this.transport.stream(request, {
-					serverUrl: options?.serverUrl,
-					signal: abortController.signal,
-				})) {
-					if (event.type === "content_delta") {
-						assistantContent += event.text;
-					} else if (event.type === "tool_calls") {
-						assistantToolCalls = event.calls;
+				let streamSucceeded = false;
+				for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
+					if (abortController.signal.aborted) break;
+					if (streamAttempt > 0) {
+						console.warn(`[ChatService] Retrying stream (attempt ${streamAttempt + 1}/${MAX_STREAM_RETRIES + 1}) for iteration ${iteration + 1}`);
+						assistantContent = "";
+						assistantToolCalls = [];
+						await new Promise((r) => setTimeout(r, streamAttempt * 2000));
 					}
-					this._onDidStreamEvent.fire({
-						type: "stream_event",
-						sessionId: session.id,
-						event,
-					});
+					try {
+						for await (const event of this.transport.stream(request, {
+							serverUrl: options?.serverUrl,
+							signal: abortController.signal,
+						})) {
+							if (event.type === "content_delta") {
+								assistantContent += event.text;
+							} else if (event.type === "tool_calls") {
+								assistantToolCalls = event.calls;
+								console.log(`[ChatService] Received tool_calls (iteration ${iteration + 1}):`, event.calls.map((c) => c.name));
+							} else if (event.type === "message_stop") {
+								console.log(`[ChatService] message_stop (iteration ${iteration + 1}), contentLen=${assistantContent.length}, toolCalls=${assistantToolCalls.length}`);
+							}
+
+							if (event.type === "message_stop" || event.type === "message_start") {
+								continue;
+							}
+							this._onDidStreamEvent.fire({
+								type: "stream_event",
+								sessionId: session.id,
+								event,
+							});
+						}
+						streamSucceeded = true;
+						break;
+					} catch (streamError) {
+						if (streamError instanceof Error && streamError.name === "AbortError") {
+							throw streamError;
+						}
+						const errMsg = streamError instanceof Error ? streamError.message : String(streamError);
+						console.error(`[ChatService] Stream error on iteration ${iteration + 1}, attempt ${streamAttempt + 1}: ${errMsg}`);
+						if (streamAttempt >= MAX_STREAM_RETRIES) {
+							throw streamError;
+						}
+					}
 				}
+				if (!streamSucceeded) break;
 
 				const sanitizedAssistantContent = sanitizeAssistantToolEchoes(
 					assistantContent,
@@ -324,6 +359,7 @@ export class ChatService {
 				}
 
 				if (assistantToolCalls.length === 0) {
+					console.log(`[ChatService] No tool calls, ending loop at iteration ${iteration + 1}`);
 					break;
 				}
 				if (!toolContext) {
@@ -332,10 +368,18 @@ export class ChatService {
 					);
 				}
 
+				this._onDidStreamEvent.fire({
+					type: "stream_event",
+					sessionId: session.id,
+					event: { type: "tool_executing" },
+				});
+
+				console.log(`[ChatService] Executing ${assistantToolCalls.length} tool call(s) (iteration ${iteration + 1}):`, assistantToolCalls.map((c) => `${c.name}(${JSON.stringify(c.input).slice(0, 100)})`));
 				const executed = await executeToolCalls(
 					assistantToolCalls,
 					toolContext,
 				);
+				console.log(`[ChatService] Tool execution done (iteration ${iteration + 1}), results:`, executed.map((e) => ({ tool: e.call.name, isError: e.result.isError, contentLen: e.result.content.length })));
 				for (const item of executed) {
 					this.commitEntry(
 						session.id,
@@ -375,8 +419,23 @@ export class ChatService {
 
 				session = this.store.getSnapshot(session.id) ?? session;
 			}
+
+			if (iteration >= MAX_TOOL_ITERATIONS) {
+				console.warn(`[ChatService] Tool loop hit max iterations (${MAX_TOOL_ITERATIONS}), session=${session.id}`);
+				this.commitEntry(
+					session.id,
+					createTranscriptEntry({
+						role: "assistant",
+						content: `Reached the maximum number of tool-use steps (${MAX_TOOL_ITERATIONS}). You can send another message to continue.`,
+						visibility: "visible",
+						includeInHistory: false,
+						subtype: "error",
+					}),
+				);
+			}
 		} catch (error) {
 			if (error instanceof Error && error.name === "AbortError") {
+				console.log("[ChatService] Stream aborted by user, session:", session.id);
 				this.commitEntry(
 					session.id,
 					createTranscriptEntry({
@@ -389,11 +448,15 @@ export class ChatService {
 					}),
 				);
 			} else {
+				const errMsg = error instanceof Error ? error.message : String(error);
+				const errName = error instanceof Error ? error.name : "Unknown";
+				const errStack = error instanceof Error ? error.stack : undefined;
+				console.error("[ChatService] Stream error:", { name: errName, message: errMsg, stack: errStack, model: resolvedModel, session: session.id });
 				this.commitEntry(
 					session.id,
 					createTranscriptEntry({
 						role: "assistant",
-						content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+						content: `Error: ${errMsg}`,
 						visibility: "visible",
 						includeInHistory: false,
 						subtype: "error",
@@ -401,6 +464,11 @@ export class ChatService {
 				);
 			}
 		} finally {
+			this._onDidStreamEvent.fire({
+				type: "stream_event",
+				sessionId: session.id,
+				event: { type: "message_stop" },
+			});
 			if (this._abortController === abortController) {
 				this._abortController = null;
 			}

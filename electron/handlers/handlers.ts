@@ -66,6 +66,9 @@ function resolveLlamaBinaryPath(): string | undefined {
 }
 
 let llamaServerProcess: ReturnType<typeof spawn> | undefined;
+let intentionalKill = false;
+let lastServerUrl = `http://localhost:${DEFAULT_LLAMA_PORT}`;
+let restartTimer: ReturnType<typeof setTimeout> | undefined;
 const activeModelDownloads = new Map<string, AbortController>();
 
 function splitDownloadSpecifier(modelId: string): { repoId: string; quantization?: string } {
@@ -80,6 +83,11 @@ function splitDownloadSpecifier(modelId: string): { repoId: string; quantization
 }
 
 export function killLlamaServer() {
+  intentionalKill = true;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = undefined;
+  }
   if (llamaServerProcess) {
     try { llamaServerProcess.kill(); } catch { /* ignore */ }
     llamaServerProcess = undefined;
@@ -112,12 +120,17 @@ async function startManagedLlamaServer(serverUrl: string): Promise<void> {
     localModelsDir: modelsDir,
   });
 
+  intentionalKill = false;
+  lastServerUrl = serverUrl;
+
   if (llamaServerProcess) {
+    intentionalKill = true;
     try {
       llamaServerProcess.kill();
     } catch {
       // ignore
     }
+    intentionalKill = false;
   }
 
   llamaServerProcess = spawn(binaryPath, args, {
@@ -126,16 +139,47 @@ async function startManagedLlamaServer(serverUrl: string): Promise<void> {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  console.info("[LlamaServer] Starting managed server:", binaryPath, args);
+  const pid = llamaServerProcess.pid;
+  console.info(`[LlamaServer] Started managed server (pid=${pid}):`, binaryPath, args.join(" "));
+
+  llamaServerProcess.stdout?.on("data", (chunk: Buffer) => {
+    const text = chunk.toString().trimEnd();
+    if (text) console.log(`[llama-server:stdout:${pid}]`, text);
+  });
+
+  llamaServerProcess.stderr?.on("data", (chunk: Buffer) => {
+    const text = chunk.toString().trimEnd();
+    if (text) console.error(`[llama-server:stderr:${pid}]`, text);
+  });
 
   llamaServerProcess.on("error", (error) => {
-    console.error("[LlamaServer] Server spawn error:", error);
+    console.error(`[LlamaServer] Server spawn error (pid=${pid}):`, error.message);
     llamaServerProcess = undefined;
+    scheduleAutoRestart();
   });
 
-  llamaServerProcess.on("close", () => {
+  llamaServerProcess.on("close", (code, signal) => {
+    console.warn(`[LlamaServer] Server process exited (pid=${pid}): code=${code}, signal=${signal}, intentional=${intentionalKill}`);
     llamaServerProcess = undefined;
+    scheduleAutoRestart();
   });
+}
+
+function scheduleAutoRestart() {
+  if (intentionalKill) return;
+  if (restartTimer) return;
+
+  const RESTART_DELAY_MS = 2000;
+  console.info(`[LlamaServer] Scheduling auto-restart in ${RESTART_DELAY_MS}ms...`);
+  restartTimer = setTimeout(async () => {
+    restartTimer = undefined;
+    try {
+      console.info("[LlamaServer] Auto-restarting server...");
+      await startManagedLlamaServer(lastServerUrl);
+    } catch (error) {
+      console.error("[LlamaServer] Auto-restart failed:", error);
+    }
+  }, RESTART_DELAY_MS);
 }
 
 export async function ensureLlamaServerStarted(serverUrl = `http://localhost:${DEFAULT_LLAMA_PORT}`): Promise<void> {
@@ -212,6 +256,11 @@ export function registerLlamaHandlers() {
   });
 
   ipcMain.handle("llama:stop-server", async () => {
+    intentionalKill = true;
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = undefined;
+    }
     if (llamaServerProcess) {
       llamaServerProcess.kill();
       llamaServerProcess = undefined;

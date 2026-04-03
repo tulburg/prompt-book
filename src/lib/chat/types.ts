@@ -129,6 +129,7 @@ export type ChatStreamMode = "idle" | "requesting" | "responding";
 export type ChatTransportEvent =
 	| { type: "message_start" }
 	| { type: "content_delta"; text: string }
+	| { type: "tool_executing" }
 	| {
 			type: "tool_calls";
 			calls: Array<{

@@ -239,6 +239,152 @@ describe("request builder", () => {
 		expect(bashTool?.function.parameters.properties?.timeout?.type).toBe("integer");
 		expect(bashTool?.function.parameters.properties?.run_in_background?.type).toBe("boolean");
 		expect(bashTool?.function.parameters.properties?.working_directory?.type).toBe("string");
+		expect(request.system.join("\n")).toContain("CRITICAL: When not using native structured tool calls");
+		expect(request.system.join("\n")).toContain('{"tool":"<tool_name>","arguments":{"<argument_name>":"<argument_value>"}}');
+		expect(request.system.join("\n")).toContain("When you emit thinking or reasoning");
 		expect(request.system.join("\n")).toContain("# Available Tools");
+	});
+
+	it("serializes qwen tool turns without assistant echo text", () => {
+		const session: ChatSessionState = {
+			id: "session-qwen-tools",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Inspect the file",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+				createTranscriptEntry({
+					role: "assistant",
+					content: 'Read({"file_path":"/workspace/file.txt"})',
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_use",
+					toolInvocation: {
+						toolCallId: "tool-1",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+					},
+				}),
+				createTranscriptEntry({
+					role: "tool",
+					content: "file contents",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_result",
+					toolResult: {
+						toolCallId: "tool-1",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+						outputText: "file contents",
+					},
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.messages).toHaveLength(3);
+		expect(request.messages[1]).toEqual({
+			role: "assistant",
+			content: null,
+			tool_calls: [
+				{
+					id: "tool-1",
+					type: "function",
+					function: {
+						name: "Read",
+						arguments: JSON.stringify({ file_path: "/workspace/file.txt" }),
+					},
+				},
+			],
+		});
+		expect(request.messages[2]).toMatchObject({
+			role: "tool",
+			tool_call_id: "tool-1",
+			name: "Read",
+		});
+		expect(request.messages[2]?.content?.[0]?.text).toContain('"ok":true');
+		expect(request.messages[2]?.content?.[0]?.text).toContain("file contents");
+	});
+
+	it("serializes gemma tool results as user messages", () => {
+		const session: ChatSessionState = {
+			id: "session-gemma-tools",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "google/gemma-3-27b-it",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "assistant",
+					content: 'Read({"file_path":"/workspace/file.txt"})',
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_use",
+					toolInvocation: {
+						toolCallId: "tool-2",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+					},
+				}),
+				createTranscriptEntry({
+					role: "tool",
+					content: "missing file",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_result",
+					toolResult: {
+						toolCallId: "tool-2",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+						outputText: "missing file",
+						isError: true,
+					},
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "google/gemma-3-27b-it",
+			modelName: "Gemma 3 27B",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.format).toBe("gemma");
+		expect(request.messages).toHaveLength(2);
+		expect(request.messages[1]).toMatchObject({
+			role: "user",
+			tool_call_id: "tool-2",
+			name: "Read",
+		});
+		expect(request.messages[1]?.content?.[0]?.text).toContain("Tool result (error) for tool-2:");
+		expect(request.messages[1]?.content?.[0]?.text).toContain('"ok":false');
+		expect(request.messages[1]?.content?.[0]?.text).toContain("missing file");
 	});
 });

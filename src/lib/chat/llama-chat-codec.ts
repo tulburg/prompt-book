@@ -34,6 +34,7 @@ export interface LlamaChatCompletionRequest {
 	stop: string[];
 	tools?: LlamaNativeTool[];
 	tool_choice?: "auto" | "none";
+	parallel_tool_calls?: boolean;
 }
 
 function flattenBlocks(
@@ -59,6 +60,8 @@ function mergeConsecutiveSameRole(messages: LlamaChatMessage[]): LlamaChatMessag
 			prev.role === msg.role &&
 			!prev.tool_calls &&
 			!msg.tool_calls &&
+			!prev.tool_call_id &&
+			!msg.tool_call_id &&
 			prev.role !== "tool"
 		) {
 			prev.content = `${prev.content ?? ""}\n\n${msg.content ?? ""}`;
@@ -99,7 +102,7 @@ const STOP_SEQUENCES_BY_FORMAT: Record<AnthropicRequest["format"], string[]> = {
 export function buildLlamaChatCompletionRequest(
 	request: AnthropicRequest,
 ): LlamaChatCompletionRequest {
-	return {
+	const payload: LlamaChatCompletionRequest = {
 		model: request.model,
 		messages: toLlamaMessages(request),
 		stream: request.stream,
@@ -108,6 +111,12 @@ export function buildLlamaChatCompletionRequest(
 		tools: request.tools,
 		tool_choice: request.tool_choice,
 	};
+
+	if (payload.tools?.length) {
+		payload.parallel_tool_calls = false;
+	}
+
+	return payload;
 }
 
 export function filterModelTextContent(content: string): string {

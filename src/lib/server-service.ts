@@ -88,8 +88,14 @@ export class LlamaServerService {
 	private readonly _onDidPullProgress = new SimpleEmitter<PullProgressEvent>();
 	readonly onDidPullProgress = this._onDidPullProgress.on.bind(this._onDidPullProgress);
 
+	private readonly _onDidRecover = new SimpleEmitter<void>();
+	readonly onDidRecover = this._onDidRecover.on.bind(this._onDidRecover);
+
 	private _status: LlamaServerStatus = "stopped";
 	private _pullAborts = new Map<string, AbortController>();
+	private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+	private _activeModelId: string | null = null;
+	private _recovering = false;
 
 	get status(): LlamaServerStatus {
 		return this._status;
@@ -106,14 +112,19 @@ export class LlamaServerService {
 			if (health.ok) {
 				return true;
 			}
-		} catch {
-			// fall through
+			console.warn("[LlamaServer] /health returned non-OK:", health.status, health.statusText);
+		} catch (error) {
+			console.debug("[LlamaServer] /health unreachable:", error instanceof Error ? error.message : String(error));
 		}
 
 		try {
 			const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(1500) });
+			if (!response.ok) {
+				console.warn("[LlamaServer] /models returned non-OK:", response.status, response.statusText);
+			}
 			return response.ok;
-		} catch {
+		} catch (error) {
+			console.debug("[LlamaServer] /models unreachable:", error instanceof Error ? error.message : String(error));
 			return false;
 		}
 	}
@@ -154,12 +165,18 @@ export class LlamaServerService {
 	private async getModelStatus(baseUrl: string, modelId: string): Promise<string | null> {
 		try {
 			const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(4000) });
-			if (!response.ok) return null;
+			if (!response.ok) {
+				console.warn("[LlamaServer] getModelStatus: /models returned", response.status);
+				return null;
+			}
 			const payload = (await response.json()) as { data?: Array<{ id?: string; status?: { value?: string } }> };
 			const models = payload.data ?? [];
 			const match = models.find((m) => m.id === modelId);
-			return match?.status?.value ?? null;
-		} catch {
+			const status = match?.status?.value ?? null;
+			console.debug("[LlamaServer] getModelStatus:", { modelId, status, allModels: models.map((m) => ({ id: m.id, status: m.status?.value })) });
+			return status;
+		} catch (error) {
+			console.warn("[LlamaServer] getModelStatus failed:", error instanceof Error ? error.message : String(error));
 			return null;
 		}
 	}
@@ -173,6 +190,7 @@ export class LlamaServerService {
 		const existingStatus = await this.getModelStatus(baseUrl, normalizedModelId);
 		if (existingStatus === "loaded") {
 			console.log("[LlamaServer] loadModel: already loaded, skipping");
+			this._activeModelId = normalizedModelId;
 			this._onDidLoadProgress.fire(100);
 			this._onDidLoadModel.fire();
 			return;
@@ -214,6 +232,7 @@ export class LlamaServerService {
 				console.log("[LlamaServer] loadModel poll:", { modelId: normalizedModelId, status });
 				if (status === "loaded") {
 					console.log("[LlamaServer] loadModel: model is now loaded ✓");
+					this._activeModelId = normalizedModelId;
 					this._onDidLoadProgress.fire(100);
 					this._onDidLoadModel.fire();
 					return;
@@ -314,27 +333,33 @@ export class LlamaServerService {
 
 	async startServer(serverUrl?: string): Promise<void> {
 		const baseUrl = this.normalizeServerUrl(serverUrl);
+		console.log("[LlamaServer] startServer called, baseUrl:", baseUrl);
 		this._setStatus("starting");
 
 		const healthy = await this.isServerHealthy(baseUrl);
 		if (healthy) {
+			console.log("[LlamaServer] startServer: already healthy");
 			this._setStatus("running");
 			return;
 		}
 
 		try {
+			console.log("[LlamaServer] startServer: requesting IPC start...");
 			if (window.llamaBridge) {
 				await window.llamaBridge.startServer(baseUrl);
 			} else {
 				await window.ipcRenderer.invoke("llama:start-server", baseUrl);
 			}
+			console.log("[LlamaServer] startServer: IPC done, waiting for server...");
 			await this.waitForServer(baseUrl);
-		} catch {
+		} catch (error) {
+			console.error("[LlamaServer] startServer failed:", error instanceof Error ? error.message : String(error));
 			this._setStatus("error");
 		}
 	}
 
 	async stopServer(_serverUrl?: string): Promise<void> {
+		console.log("[LlamaServer] stopServer called");
 		try {
 			if (window.llamaBridge) {
 				await window.llamaBridge.stopServer();
@@ -342,7 +367,8 @@ export class LlamaServerService {
 				await window.ipcRenderer.invoke("llama:stop-server");
 			}
 			this._setStatus("stopped");
-		} catch {
+		} catch (error) {
+			console.error("[LlamaServer] stopServer failed:", error instanceof Error ? error.message : String(error));
 			this._setStatus("error");
 		}
 	}
@@ -376,14 +402,94 @@ export class LlamaServerService {
 			await new Promise((resolve) => setTimeout(resolve, intervalMs));
 		}
 
-		this._setStatus("running");
+		console.warn("[LlamaServer] waitForServer timed out after", timeoutMs, "ms");
+		this._setStatus("error");
+	}
+
+	startHeartbeat(intervalMs = 10_000): void {
+		this.stopHeartbeat();
+		console.log("[LlamaServer] Starting heartbeat, interval:", intervalMs);
+		this._heartbeatTimer = setInterval(() => void this._heartbeatCheck(), intervalMs);
+	}
+
+	stopHeartbeat(): void {
+		if (this._heartbeatTimer) {
+			clearInterval(this._heartbeatTimer);
+			this._heartbeatTimer = null;
+		}
+	}
+
+	private async _heartbeatCheck(): Promise<void> {
+		if (this._status !== "running" || this._recovering) return;
+
+		const t0 = Date.now();
+		const healthy = await this.isServerHealthy();
+		const elapsed = Date.now() - t0;
+		if (healthy) {
+			console.debug(`[LlamaServer] Heartbeat: OK (${elapsed}ms), activeModel=${this._activeModelId}`);
+			return;
+		}
+
+		console.warn(`[LlamaServer] Heartbeat: server NOT healthy (check took ${elapsed}ms), status=${this._status}, activeModel=${this._activeModelId}`);
+		this._recovering = true;
+		this._setStatus("starting");
+
+		const MAX_WAIT_MS = 30_000;
+		const POLL_MS = 2_000;
+		const deadline = Date.now() + MAX_WAIT_MS;
+		let recovered = false;
+		let attempts = 0;
+
+		while (Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, POLL_MS));
+			attempts++;
+			const ok = await this.isServerHealthy();
+			console.debug(`[LlamaServer] Heartbeat recovery poll #${attempts}: healthy=${ok}`);
+			if (ok) {
+				recovered = true;
+				break;
+			}
+		}
+
+		if (!recovered) {
+			console.warn("[LlamaServer] Heartbeat: auto-restart did not restore server, requesting manual startServer...");
+			try {
+				await this.startServer();
+				recovered = this._status === "running";
+			} catch (error) {
+				console.error("[LlamaServer] Heartbeat: startServer failed:", error instanceof Error ? error.message : String(error));
+				recovered = false;
+			}
+		}
+
+		if (recovered) {
+			this._setStatus("running");
+			console.info("[LlamaServer] Heartbeat: server recovered after", Date.now() - t0, "ms");
+			if (this._activeModelId) {
+				console.info("[LlamaServer] Heartbeat: reloading model:", this._activeModelId);
+				try {
+					await this.loadModel(this._activeModelId);
+					console.info("[LlamaServer] Heartbeat: model reloaded successfully");
+				} catch (error) {
+					console.error("[LlamaServer] Heartbeat: failed to reload model:", error instanceof Error ? error.message : String(error));
+				}
+			}
+			this._onDidRecover.fire();
+		} else {
+			console.error("[LlamaServer] Heartbeat: recovery FAILED after", Date.now() - t0, "ms and", attempts, "polls");
+			this._setStatus("error");
+		}
+
+		this._recovering = false;
 	}
 
 	private _setStatus(status: LlamaServerStatus): void {
 		if (this._status === status) {
 			return;
 		}
+		const prev = this._status;
 		this._status = status;
+		console.log(`[LlamaServer] Status: ${prev} → ${status}`);
 		this._onDidChangeStatus.fire(status);
 	}
 }

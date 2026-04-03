@@ -86,7 +86,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		toolResultMode: "tool",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
-		nativeToolCalling: "unsupported",
+		nativeToolCalling: "supported",
 	},
 ] as const;
 

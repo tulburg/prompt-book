@@ -36,6 +36,10 @@ export function handleChatStreamEvent(
 		case "tool_calls":
 			callbacks.onSetStreamMode("responding");
 			return;
+		case "tool_executing":
+			callbacks.onStreamingText?.(() => null);
+			callbacks.onSetStreamMode("requesting");
+			return;
 		default:
 			return;
 	}
