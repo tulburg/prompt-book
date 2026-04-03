@@ -20,8 +20,10 @@ import {
   Loader2,
   Pencil,
   Search,
+  Sparkles,
   SquareTerminal,
   FilePlus,
+  Bot,
 } from "lucide-react";
 
 /* ── Utility helpers ── */
@@ -231,7 +233,10 @@ function setPreviewState(key: string, state: PreviewViewState) {
   if (subs) for (const fn of subs) fn();
 }
 
-function usePreviewStore(stateKey: string | undefined, initialState: PreviewViewState) {
+function usePreviewStore(
+  stateKey: string | undefined,
+  initialState: PreviewViewState,
+) {
   const [, tick] = React.useReducer((x: number) => x + 1, 0);
 
   React.useEffect(() => {
@@ -249,7 +254,9 @@ function usePreviewStore(stateKey: string | undefined, initialState: PreviewView
     };
   }, [stateKey, initialState]);
 
-  const current = stateKey ? getPreviewState(stateKey, initialState) : initialState;
+  const current = stateKey
+    ? getPreviewState(stateKey, initialState)
+    : initialState;
 
   const cycle = React.useCallback(
     (baseInit: PreviewViewState) => {
@@ -257,7 +264,8 @@ function usePreviewStore(stateKey: string | undefined, initialState: PreviewView
       const s = getPreviewState(stateKey, baseInit);
       let next: PreviewViewState;
       if (s === "collapsed") next = "expanded";
-      else if (s === "expanded") next = baseInit === "peek" ? "peek" : "collapsed";
+      else if (s === "expanded")
+        next = baseInit === "peek" ? "peek" : "collapsed";
       else next = "expanded";
       setPreviewState(stateKey, next);
     },
@@ -542,7 +550,12 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "input_output" && display.output && !isRunning) {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView
                 value={display.output!}
@@ -769,13 +782,23 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "file_list") {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {() => <FileListInline display={display} />}
           </PreviewBox>
         );
       } else if (display?.kind === "input_output" && display.output) {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView
                 value={display.output!}
@@ -816,7 +839,12 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "file_list") {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={140}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={140}
+          >
             {() => (
               <div className="px-3 py-2">
                 <FileListInline display={display} />
@@ -859,7 +887,12 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "input_output" && display.output) {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView value={display.output!} maxHeight={maxH} />
             )}
@@ -885,7 +918,12 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "todo_list") {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={160}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={160}
+          >
             {() => (
               <div className="px-3 py-2">
                 <TodoListInline display={display} />
@@ -925,7 +963,12 @@ function buildToolAction(
       let preview: React.ReactNode = null;
       if (display?.kind === "input_output" && display.output) {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView value={display.output!} maxHeight={maxH} />
             )}
@@ -933,7 +976,12 @@ function buildToolAction(
         );
       } else if (display?.kind === "json") {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView
                 value={JSON.stringify(display.value, null, 2)}
@@ -945,7 +993,12 @@ function buildToolAction(
         );
       } else if (display?.kind === "text") {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {() => (
               <div className="px-3 py-2 text-[12px] text-foreground/80 whitespace-pre-wrap">
                 {display.text}
@@ -955,7 +1008,12 @@ function buildToolAction(
         );
       } else if (!display && result?.outputText) {
         preview = (
-          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
             {(maxH) => (
               <MonacoCodeView value={result.outputText} maxHeight={maxH} />
             )}
@@ -1159,6 +1217,28 @@ export function WorkingTimelineRow({
       <div className="flex min-h-[20px] items-center pb-3">
         <span className="text-[12.5px] tool-title-shimmer">{text}</span>
       </div>
+    </div>
+  );
+}
+
+/* ── Assistant message timeline row (exported for ChatPanel) ── */
+
+export function AssistantTimelineRow({
+  isLast = false,
+  children,
+}: {
+  isLast?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="relative flex gap-3 pb-0.5">
+      {!isLast && (
+        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
+      )}
+      <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center">
+        <Bot className="size-4 text-foreground" />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col pb-3">{children}</div>
     </div>
   );
 }

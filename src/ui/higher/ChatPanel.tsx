@@ -9,6 +9,7 @@ import {
   ToolMessageRenderer,
   ThinkingTimelineRow,
   WorkingTimelineRow,
+  AssistantTimelineRow,
 } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 import type { ChatMode } from "@/lib/chat/types";
 import {
@@ -635,21 +636,24 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
 
               const isToolMsg =
                 msg.subtype === "tool_use" || msg.subtype === "tool_result";
+
+              const nextVisible = messages
+                .slice(idx + 1)
+                .find(
+                  (m) =>
+                    !(
+                      m.subtype === "tool_result" &&
+                      toolMessagePairing.pairedResultIds.has(m.id)
+                    ),
+                );
+              const isLastInTurn =
+                !nextVisible || nextVisible.role === "user";
               let isLastToolInRun = false;
               if (isToolMsg) {
-                const nextVisible = messages
-                  .slice(idx + 1)
-                  .find(
-                    (m) =>
-                      !(
-                        m.subtype === "tool_result" &&
-                        toolMessagePairing.pairedResultIds.has(m.id)
-                      ),
-                  );
                 const nextIsAlsoTool =
                   nextVisible?.subtype === "tool_use" ||
                   nextVisible?.subtype === "tool_result";
-                isLastToolInRun = !nextIsAlsoTool;
+                isLastToolInRun = !nextIsAlsoTool && isLastInTurn;
               }
 
               if (msg.subtype === "tool_use") {
@@ -663,6 +667,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                       onOpenFileAtLine={onOpenFileAtLine}
                       pairedResult={pairedResult}
                       isLastTool={isLastToolInRun && !isStreaming}
+                      isLast={isLastInTurn && !isStreaming}
                     />
                   );
                 }
@@ -673,6 +678,7 @@ export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
                   message={msg}
                   onOpenFileAtLine={onOpenFileAtLine}
                   isLastTool={isLastToolInRun && !isStreaming}
+                  isLast={isLastInTurn && !isStreaming}
                 />
               );
             })}
@@ -973,11 +979,13 @@ function ChatMessageItem({
   onOpenFileAtLine,
   pairedResult,
   isLastTool = false,
+  isLast = false,
 }: {
   message: ChatMessage;
   pairedResult?: ChatMessage;
   onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
   isLastTool?: boolean;
+  isLast?: boolean;
 }) {
   const isUser = message.role === "user";
   const isNotice =
@@ -986,20 +994,14 @@ function ChatMessageItem({
     message.subtype === "interruption";
   const isToolMessage =
     message.subtype === "tool_use" || message.subtype === "tool_result";
+  const isAssistantText = !isUser && !isToolMessage && !isNotice;
 
   return (
     <div
-      className={`flex cursor-default select-text flex-col px-4 ${isUser ? "items-end py-1.5" : isToolMessage ? "py-0" : "py-1.5"}`}
+      className={`flex cursor-default select-text flex-col px-4 ${isUser ? "items-end py-1.5" : isToolMessage ? "py-0" : isAssistantText ? "py-0" : "py-1.5"}`}
     >
-      {!isUser && !isToolMessage && (
-        <div className="mb-1 flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-full bg-border-500">
-            <span className="text-sm text-sky">&#10022;</span>
-          </div>
-        </div>
-      )}
       <div
-        className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "pl-0.5" : ""}`}
+        className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "pl-0.5" : isAssistantText ? "pl-0.5" : ""}`}
       >
         {isToolMessage ? (
           <ToolMessageRenderer
@@ -1010,6 +1012,10 @@ function ChatMessageItem({
           />
         ) : message.isStreaming && !message.content ? (
           <WorkingTimelineRow text="Working..." isLast />
+        ) : isAssistantText ? (
+          <AssistantTimelineRow isLast={isLast}>
+            <AssistantMessageContent message={message} isNotice={false} />
+          </AssistantTimelineRow>
         ) : (
           <AssistantMessageContent message={message} isNotice={isNotice} />
         )}
