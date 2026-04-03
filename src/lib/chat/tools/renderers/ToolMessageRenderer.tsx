@@ -12,80 +12,966 @@ import type {
   DiffHunk,
   JsonObject,
 } from "@/lib/chat/tools/tool-types";
-import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
-import { Search, SquareTerminal } from "lucide-react";
+import {
+  ChevronUp,
+  FileText,
+  Globe,
+  ListChecks,
+  Loader2,
+  Pencil,
+  Search,
+  SquareTerminal,
+  FilePlus,
+} from "lucide-react";
 
-/* ── Primitives ── */
+/* ── Utility helpers ── */
 
-function CodeBlock({
+function shortenPath(path: string): string {
+  if (!path) return "";
+  const parts = path.split("/");
+  if (parts.length <= 3) return path;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
+function extractFileNameFromPathLike(value: string | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || /^[a-z]+:\/\//i.test(trimmed)) return null;
+
+  const normalized = trimmed.replace(/\\/g, "/");
+  const fileName = normalized.split("/").pop() || normalized;
+  if (!fileName) return null;
+
+  if (
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    /\.[a-z0-9_-]+$/i.test(fileName) ||
+    fileName === "Settings"
+  ) {
+    return fileName;
+  }
+  return null;
+}
+
+function getIOCardFileName(
+  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
+): string | null {
+  try {
+    const parsed = JSON.parse(display.input) as Record<string, unknown>;
+    const pathValue =
+      (typeof parsed.file_path === "string" && parsed.file_path) ||
+      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
+      undefined;
+    const fromInput = extractFileNameFromPathLike(pathValue);
+    if (fromInput) return fromInput;
+  } catch {
+    /* fallback */
+  }
+  return (
+    extractFileNameFromPathLike(display.title) ??
+    extractFileNameFromPathLike(display.subtitle)
+  );
+}
+
+function getIOCardFilePath(
+  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
+): string | undefined {
+  try {
+    const parsed = JSON.parse(display.input) as Record<string, unknown>;
+    const pathValue =
+      (typeof parsed.file_path === "string" && parsed.file_path) ||
+      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
+      undefined;
+    if (pathValue) return pathValue;
+  } catch {
+    /* fallback */
+  }
+  const titlePath =
+    typeof display.title === "string" ? display.title : undefined;
+  if (titlePath?.includes("/") || titlePath?.includes("\\")) return titlePath;
+  return undefined;
+}
+
+function getFileNameFromToolInput(input: JsonObject): string | null {
+  const pathValue =
+    (typeof input.file_path === "string" && input.file_path) ||
+    (typeof input.notebook_path === "string" && input.notebook_path) ||
+    undefined;
+  return extractFileNameFromPathLike(pathValue);
+}
+
+function getFilePathFromToolInput(input: JsonObject): string | undefined {
+  return (
+    (typeof input.file_path === "string" && input.file_path) ||
+    (typeof input.notebook_path === "string" && input.notebook_path) ||
+    undefined
+  );
+}
+
+function getReadNavigationLineFromToolInput(input: JsonObject): number {
+  const offsetValue = input.offset;
+  return typeof offsetValue === "number" && offsetValue > 0 ? offsetValue : 1;
+}
+
+function getDiffNavigationLine(display: ChatToolDisplayDiff) {
+  const firstHunk = display.hunks[0];
+  if (!firstHunk) return 1;
+  return Math.max(1, firstHunk.newStart || firstHunk.oldStart || 1);
+}
+
+/* ── Timeline icon mapping ── */
+
+function getToolIcon(toolName: string): React.ReactNode {
+  const cls = "size-4";
+  switch (toolName) {
+    case "Read":
+      return <FileText className={cls} />;
+    case "Write":
+    case "Edit":
+      return <Pencil className={cls} />;
+    case "Bash":
+    case "Shell":
+      return <SquareTerminal className={cls} />;
+    case "Grep":
+    case "Glob":
+    case "WebSearch":
+      return <Search className={cls} />;
+    case "WebFetch":
+      return <Globe className={cls} />;
+    case "TodoWrite":
+      return <ListChecks className={cls} />;
+    case "NotebookEdit":
+      return <FilePlus className={cls} />;
+    default:
+      return <FileText className={cls} />;
+  }
+}
+
+/* ── Timeline primitives ── */
+
+function TimelineRow({
+  icon,
+  label,
+  isLast = false,
   children,
-  maxHeight,
+  onOpenFileAtLine,
   filePath,
-  language,
+  fileLine,
+  previewStateKey,
 }: {
-  children: string;
-  maxHeight?: number;
+  icon: React.ReactNode;
+  label: React.ReactNode;
+  isLast?: boolean;
+  children?: React.ReactNode;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
   filePath?: string;
-  language?: string;
+  fileLine?: number;
+  previewStateKey?: string;
 }) {
   return (
-    <MonacoCodeView
-      value={children}
-      filePath={filePath}
-      language={language}
-      maxHeight={maxHeight}
-    />
+    <div className="relative flex gap-3 pb-0.5">
+      {!isLast && (
+        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
+      )}
+
+      <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center text-foreground/55">
+        {icon}
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 pb-3">
+        <div className="flex min-h-[20px] items-center gap-2">
+          <span className="text-[12.5px] text-foreground/80">{label}</span>
+          {filePath && onOpenFileAtLine && (
+            <button
+              type="button"
+              className="inline-flex min-w-0 items-center gap-1 text-[12px] text-foreground/60 transition-colors hover:text-foreground"
+              onClick={() => void onOpenFileAtLine(filePath, fileLine ?? 1)}
+              title={`Open ${filePath}`}
+            >
+              <FileIcon fileName={filePath.split("/").pop() || filePath} />
+              <span className="min-w-0 truncate">
+                {filePath.split("/").pop() || filePath}
+              </span>
+            </button>
+          )}
+          <PreviewToggle stateKey={previewStateKey} />
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
-function StatusDot({
-  status,
-}: {
-  status: "success" | "error" | "running" | "neutral";
-}) {
-  const colors: Record<string, string> = {
-    success: "bg-green-400",
-    error: "bg-red-400",
-    running: "bg-sky animate-pulse",
-    neutral: "bg-foreground/30",
-  };
+function ThinkingDot() {
   return (
-    <span className={`inline-block size-2 rounded-full ${colors[status]}`} />
+    <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center">
+      <span className="thinking-glow-dot block size-2 rounded-full bg-sky" />
+    </div>
   );
 }
 
-function ChevronIcon({
-  state,
-  className,
+function SpinnerIcon() {
+  return <Loader2 className="size-4 animate-spin" />;
+}
+
+/* ── Preview box ── */
+
+type PreviewViewState = "collapsed" | "peek" | "expanded";
+
+const previewStore = new Map<string, PreviewViewState>();
+const previewSubs = new Map<string, Set<() => void>>();
+
+function getPreviewState(key: string, fallback: PreviewViewState) {
+  return previewStore.get(key) ?? fallback;
+}
+
+function setPreviewState(key: string, state: PreviewViewState) {
+  previewStore.set(key, state);
+  const subs = previewSubs.get(key);
+  if (subs) for (const fn of subs) fn();
+}
+
+function usePreviewStore(stateKey: string | undefined, initialState: PreviewViewState) {
+  const [, tick] = React.useReducer((x: number) => x + 1, 0);
+
+  React.useEffect(() => {
+    if (!stateKey) return;
+    if (!previewStore.has(stateKey)) previewStore.set(stateKey, initialState);
+    let subs = previewSubs.get(stateKey);
+    if (!subs) {
+      subs = new Set();
+      previewSubs.set(stateKey, subs);
+    }
+    subs.add(tick);
+    return () => {
+      subs!.delete(tick);
+      if (subs!.size === 0) previewSubs.delete(stateKey);
+    };
+  }, [stateKey, initialState]);
+
+  const current = stateKey ? getPreviewState(stateKey, initialState) : initialState;
+
+  const cycle = React.useCallback(
+    (baseInit: PreviewViewState) => {
+      if (!stateKey) return;
+      const s = getPreviewState(stateKey, baseInit);
+      let next: PreviewViewState;
+      if (s === "collapsed") next = "expanded";
+      else if (s === "expanded") next = baseInit === "peek" ? "peek" : "collapsed";
+      else next = "expanded";
+      setPreviewState(stateKey, next);
+    },
+    [stateKey],
+  );
+
+  const toggle = React.useCallback(() => {
+    if (!stateKey) return;
+    const s = getPreviewState(stateKey, initialState);
+    setPreviewState(stateKey, s === "collapsed" ? "expanded" : "collapsed");
+  }, [stateKey, initialState]);
+
+  return { current, cycle, toggle };
+}
+
+function PreviewBox({
+  children,
+  stateKey,
+  initialState = "collapsed",
+  hasExternalToggle = false,
+  peekMaxHeight = 140,
+  expandedMaxHeight = 400,
+  scrollToBottom = false,
 }: {
-  state: "collapsed" | "peek" | "expanded";
-  className?: string;
+  children: (maxHeight: number) => React.ReactNode;
+  stateKey?: string;
+  initialState?: PreviewViewState;
+  hasExternalToggle?: boolean;
+  peekMaxHeight?: number;
+  expandedMaxHeight?: number;
+  scrollToBottom?: boolean;
 }) {
-  const rotationClass =
-    state === "collapsed"
-      ? "-rotate-90"
-      : state === "expanded"
-        ? "rotate-180"
-        : "";
+  const { current, cycle } = usePreviewStore(stateKey, initialState);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const isCollapsed = current === "collapsed";
+  const isExpanded = current === "expanded";
+  const maxHeight = isExpanded
+    ? expandedMaxHeight
+    : current === "peek"
+      ? peekMaxHeight
+      : 0;
+
+  React.useEffect(() => {
+    if (scrollToBottom && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  });
+
+  if (isCollapsed) return null;
 
   return (
-    <svg
-      className={`size-3 text-placeholder transition-transform ${rotationClass} ${className}`}
-      viewBox="0 0 16 16"
-      fill="none"
+    <div className="relative overflow-hidden rounded-lg border border-border-500/60 bg-panel-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)]">
+      {scrollToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] h-6 bg-gradient-to-b from-panel-700 to-transparent" />
+      )}
+
+      <div ref={scrollRef} className="overflow-auto" style={{ maxHeight }}>
+        {children(maxHeight)}
+      </div>
+
+      {!hasExternalToggle && (
+        <button
+          type="button"
+          className="absolute right-1.5 top-1.5 z-[3] flex size-5 items-center justify-center rounded bg-panel-500/80 text-foreground/40 transition-colors hover:bg-panel-400 hover:text-foreground/70"
+          onClick={() => cycle(initialState)}
+          aria-label={isExpanded ? "Collapse preview" : "Expand preview"}
+        >
+          <ChevronUp
+            className={`size-3 transition-transform ${isExpanded ? "" : "rotate-180"}`}
+          />
+        </button>
+      )}
+
+      {!isExpanded && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-panel-700 to-transparent" />
+      )}
+    </div>
+  );
+}
+
+function PreviewToggle({ stateKey }: { stateKey?: string }) {
+  const { current, toggle } = usePreviewStore(stateKey, "collapsed");
+  if (!stateKey) return null;
+
+  const isOpen = current !== "collapsed";
+
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center justify-center text-foreground/30 transition-colors hover:text-foreground/60"
+      onClick={toggle}
     >
-      <path
-        d="M4 6l4 4 4-4"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+      <ChevronUp
+        className={`size-3 transition-transform ${isOpen ? "" : "rotate-180"}`}
       />
-    </svg>
+    </button>
   );
 }
 
-/* ── Tool input summarization ── */
+/* ── Terminal preview ── */
+
+function TerminalPreview({
+  command,
+  stdout,
+  isExpanded,
+}: {
+  command: string;
+  stdout?: string;
+  isExpanded: boolean;
+}) {
+  return (
+    <div>
+      <div className="px-3 py-2 bg-panel-700">
+        <div className="font-mono text-[11px] leading-relaxed text-foreground/70">
+          <span className="text-placeholder select-none">$ </span>
+          {command}
+        </div>
+      </div>
+      {stdout && (
+        <div className="border-t border-border-500/40">
+          <MonacoCodeView
+            value={stdout}
+            language="shell"
+            maxHeight={isExpanded ? 340 : 96}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Diff stats pill ── */
+
+function DiffStatsPill({
+  additions,
+  deletions,
+}: {
+  additions: number;
+  deletions: number;
+}) {
+  if (!additions && !deletions) return null;
+  return (
+    <span className="inline-flex gap-1.5 text-[11px] font-medium tabular-nums">
+      {additions > 0 && <span className="text-green-400">+{additions}</span>}
+      {deletions > 0 && <span className="text-red-400">-{deletions}</span>}
+    </span>
+  );
+}
+
+/* ── Todo list inline ── */
+
+const TODO_STATUS_ICONS: Record<string, string> = {
+  pending: "○",
+  in_progress: "◑",
+  completed: "●",
+  cancelled: "✕",
+};
+
+function TodoListInline({
+  display,
+}: {
+  display: Extract<ChatToolDisplay, { kind: "todo_list" }>;
+}) {
+  return (
+    <div className="space-y-0.5">
+      {display.items.map((item) => (
+        <div key={item.id} className="flex items-center gap-2 text-[11.5px]">
+          <span className="text-placeholder">
+            {TODO_STATUS_ICONS[item.status] ?? "○"}
+          </span>
+          <span
+            className={
+              item.status === "completed"
+                ? "text-placeholder line-through"
+                : item.status === "cancelled"
+                  ? "text-placeholder"
+                  : "text-foreground/80"
+            }
+          >
+            {item.content}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── File list inline ── */
+
+function FileListInline({ display }: { display: ChatToolDisplayFileList }) {
+  const items = display.items.map((item) =>
+    typeof item === "string" ? { value: item } : item,
+  );
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="space-y-0.5 py-1">
+      {items.map((item) => (
+        <div key={item.value} className="text-[11.5px]">
+          <span className="font-mono text-foreground/70 break-all">
+            {item.title ?? shortenPath(item.value)}
+          </span>
+          {item.description && (
+            <span className="ml-2 text-[10px] text-placeholder">
+              {item.description}
+            </span>
+          )}
+        </div>
+      ))}
+      {display.truncated && (
+        <div className="text-[10px] text-placeholder">Results truncated</div>
+      )}
+    </div>
+  );
+}
+
+/* ── Status label helpers ── */
+
+interface ToolAction {
+  icon: React.ReactNode;
+  label: React.ReactNode;
+  preview?: React.ReactNode;
+  previewStateKey?: string;
+  filePath?: string;
+  fileLine?: number;
+}
+
+function buildToolAction(
+  toolName: string,
+  input: JsonObject,
+  result:
+    | {
+        display?: ChatToolDisplay;
+        isError?: boolean;
+        outputText: string;
+      }
+    | undefined,
+  stateKey: string | undefined,
+): ToolAction {
+  const display = result?.display;
+  const isRunning = !result;
+  const isError = result?.isError;
+
+  switch (toolName) {
+    case "Read": {
+      const fileName =
+        display?.kind === "input_output"
+          ? getIOCardFileName(display)
+          : getFileNameFromToolInput(input);
+      const filePath =
+        display?.kind === "input_output"
+          ? getIOCardFilePath(display)
+          : getFilePathFromToolInput(input);
+      const line = getReadNavigationLineFromToolInput(input);
+
+      const readLabel = isRunning ? (
+        <span className="tool-title-shimmer">
+          Reading {fileName ? "" : "file"}
+        </span>
+      ) : isError ? (
+        <span className="text-red-400/90">Unable to read file</span>
+      ) : (
+        <span>Read</span>
+      );
+
+      const fileRef = fileName ? (
+        <span className="inline-flex items-center gap-1">
+          <FileIcon fileName={fileName} />
+          <span className="text-foreground/60">{fileName}</span>
+        </span>
+      ) : null;
+
+      const label = (
+        <span className="inline-flex items-center gap-1.5">
+          {readLabel}
+          {fileRef}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "input_output" && display.output && !isRunning) {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView
+                value={display.output!}
+                filePath={filePath}
+                maxHeight={maxH}
+              />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("Read"),
+        label,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+        filePath: filePath,
+        fileLine: line,
+      };
+    }
+
+    case "Edit":
+    case "Write": {
+      const fileName = getFileNameFromToolInput(input);
+      const filePath = getFilePathFromToolInput(input);
+
+      if (display?.kind === "diff") {
+        const diff = display;
+        const diffFileName = diff.filePath.split("/").pop() || diff.filePath;
+        const actionVerb =
+          diff.action === "created"
+            ? isRunning
+              ? "Creating"
+              : "Created"
+            : isRunning
+              ? "Editing"
+              : "Edited";
+
+        const label = (
+          <span className="inline-flex items-center gap-1.5">
+            <span className={isRunning ? "tool-title-shimmer" : ""}>
+              {actionVerb}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <FileIcon fileName={diffFileName} />
+              <span className="text-foreground/60">{diffFileName}</span>
+            </span>
+            <DiffStatsPill
+              additions={diff.additions}
+              deletions={diff.deletions}
+            />
+          </span>
+        );
+
+        const hasMonacoDiff =
+          diff.action === "created"
+            ? Boolean(diff.modifiedContent)
+            : diff.originalContent !== undefined &&
+              diff.modifiedContent !== undefined;
+
+        let preview: React.ReactNode = null;
+        if (diff.hunks.length > 0 && hasMonacoDiff) {
+          preview = (
+            <PreviewBox stateKey={stateKey} initialState="peek">
+              {(maxH) => (
+                <MonacoDiffView
+                  originalValue={diff.originalContent ?? ""}
+                  modifiedValue={diff.modifiedContent ?? ""}
+                  filePath={diff.filePath}
+                  maxHeight={maxH}
+                />
+              )}
+            </PreviewBox>
+          );
+        } else if (diff.hunks.length > 0) {
+          preview = (
+            <PreviewBox stateKey={stateKey} initialState="peek">
+              {() => (
+                <div className="font-mono text-[11px] leading-[18px]">
+                  {diff.hunks.map((hunk, i) => (
+                    <DiffHunkView key={`hunk-${i}`} hunk={hunk} />
+                  ))}
+                </div>
+              )}
+            </PreviewBox>
+          );
+        } else if (diff.action === "created" && diff.modifiedContent) {
+          preview = (
+            <PreviewBox stateKey={stateKey} initialState="peek">
+              {(maxH) => (
+                <MonacoCodeView
+                  value={diff.modifiedContent!}
+                  filePath={diff.filePath}
+                  maxHeight={maxH}
+                />
+              )}
+            </PreviewBox>
+          );
+        }
+
+        return {
+          icon: isRunning ? (
+            <SpinnerIcon />
+          ) : diff.action === "created" ? (
+            <FilePlus className="size-4" />
+          ) : (
+            getToolIcon(toolName)
+          ),
+          label,
+          preview,
+          filePath: diff.filePath,
+          fileLine: getDiffNavigationLine(diff),
+        };
+      }
+
+      const editLabel = isRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">
+            {toolName === "Write" ? "Writing" : "Editing"}
+          </span>
+          {fileName && (
+            <span className="inline-flex items-center gap-1">
+              <FileIcon fileName={fileName} />
+              <span className="text-foreground/60">{fileName}</span>
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>{toolName === "Write" ? "Wrote" : "Edited"}</span>
+          {fileName && (
+            <span className="inline-flex items-center gap-1">
+              <FileIcon fileName={fileName} />
+              <span className="text-foreground/60">{fileName}</span>
+            </span>
+          )}
+        </span>
+      );
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon(toolName),
+        label: editLabel,
+        filePath,
+      };
+    }
+
+    case "Bash":
+    case "Shell": {
+      const cmdDisplay = display?.kind === "command" ? display : undefined;
+      const command = cmdDisplay?.command || (input.command as string) || "";
+      const description = (input.description as string) || "";
+      const cmdIsRunning = isRunning || cmdDisplay?.status === "running";
+      const exitCode = cmdDisplay?.exitCode;
+      const hasError = exitCode != null && exitCode !== 0;
+      const hasOutput = Boolean(cmdDisplay?.stdout || cmdDisplay?.stderr);
+
+      const shellLabel = cmdIsRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">
+            {description ? `Running \`${description}\`` : "Running command"}
+          </span>
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>{description ? `Ran \`${description}\`` : "Ran command"}</span>
+          {hasError && (
+            <span className="text-[10px] text-red-400">exit {exitCode}</span>
+          )}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (command || hasOutput) {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState={cmdIsRunning ? "peek" : "collapsed"}
+            hasExternalToggle={!cmdIsRunning}
+            scrollToBottom={cmdIsRunning}
+            peekMaxHeight={140}
+          >
+            {(maxH) => (
+              <TerminalPreview
+                command={command}
+                stdout={cmdDisplay?.stdout}
+                isExpanded={maxH > 140}
+              />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: cmdIsRunning ? <SpinnerIcon /> : getToolIcon("Shell"),
+        label: shellLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "Grep":
+    case "Glob": {
+      const pattern = (input.pattern as string) || "";
+      const searchLabel = isRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">Searching</span>
+          {pattern && (
+            <span className="text-foreground/50 font-mono text-[11px]">
+              {pattern}
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>Searched</span>
+          {pattern && (
+            <span className="text-foreground/50 font-mono text-[11px]">
+              {pattern}
+            </span>
+          )}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "file_list") {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {() => <FileListInline display={display} />}
+          </PreviewBox>
+        );
+      } else if (display?.kind === "input_output" && display.output) {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView
+                value={display.output!}
+                language="plaintext"
+                maxHeight={maxH}
+              />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("Grep"),
+        label: searchLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "WebSearch": {
+      const query = (input.query as string) || "";
+      const webLabel = isRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">Searching</span>
+          {query && (
+            <span className="text-foreground/50 text-[11px]">{query}</span>
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>Searched</span>
+          {query && (
+            <span className="text-foreground/50 text-[11px]">{query}</span>
+          )}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "file_list") {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={140}>
+            {() => (
+              <div className="px-3 py-2">
+                <FileListInline display={display} />
+              </div>
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("WebSearch"),
+        label: webLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "WebFetch": {
+      const url = (input.url as string) || "";
+      const fetchLabel = isRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">Fetching</span>
+          {url && (
+            <span className="text-foreground/50 text-[11px] truncate max-w-[240px]">
+              {url}
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>Fetched</span>
+          {url && (
+            <span className="text-foreground/50 text-[11px] truncate max-w-[240px]">
+              {url}
+            </span>
+          )}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "input_output" && display.output) {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView value={display.output!} maxHeight={maxH} />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("WebFetch"),
+        label: fetchLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "TodoWrite": {
+      const todoLabel = isRunning ? (
+        <span className="tool-title-shimmer">Updating tasks</span>
+      ) : (
+        <span>Updated tasks</span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "todo_list") {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={160}>
+            {() => (
+              <div className="px-3 py-2">
+                <TodoListInline display={display} />
+              </div>
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("TodoWrite"),
+        label: todoLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    default: {
+      const summary = summarizeToolInput(toolName, input);
+      const defaultLabel = isRunning ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tool-title-shimmer">{toolName}</span>
+          {summary && (
+            <span className="text-foreground/50 text-[11px]">{summary}</span>
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <span>{toolName}</span>
+          {isError && <span className="size-1.5 rounded-full bg-red-400" />}
+          {summary && (
+            <span className="text-foreground/50 text-[11px]">{summary}</span>
+          )}
+        </span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "input_output" && display.output) {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView value={display.output!} maxHeight={maxH} />
+            )}
+          </PreviewBox>
+        );
+      } else if (display?.kind === "json") {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView
+                value={JSON.stringify(display.value, null, 2)}
+                language="json"
+                maxHeight={maxH}
+              />
+            )}
+          </PreviewBox>
+        );
+      } else if (display?.kind === "text") {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {() => (
+              <div className="px-3 py-2 text-[12px] text-foreground/80 whitespace-pre-wrap">
+                {display.text}
+              </div>
+            )}
+          </PreviewBox>
+        );
+      } else if (!display && result?.outputText) {
+        preview = (
+          <PreviewBox stateKey={stateKey} initialState="collapsed" hasExternalToggle peekMaxHeight={120}>
+            {(maxH) => (
+              <MonacoCodeView value={result.outputText} maxHeight={maxH} />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon(toolName),
+        label: defaultLabel,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+  }
+}
 
 function summarizeToolInput(
   toolName: string,
@@ -115,287 +1001,15 @@ function summarizeToolInput(
   }
 }
 
-function shortenPath(path: string): string {
-  if (!path) return "";
-  const parts = path.split("/");
-  if (parts.length <= 3) return path;
-  return `…/${parts.slice(-2).join("/")}`;
-}
-
-function extractFileNameFromPathLike(value: string | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed || /^[a-z]+:\/\//i.test(trimmed)) return null;
-
-  const normalized = trimmed.replace(/\\/g, "/");
-  const fileName = normalized.split("/").pop() || normalized;
-  if (!fileName) return null;
-
-  if (
-    normalized.includes("/") ||
-    normalized.includes("\\") ||
-    /\.[a-z0-9_-]+$/i.test(fileName) ||
-    fileName === "Settings"
-  ) {
-    return fileName;
-  }
-
-  return null;
-}
-
-function getIOCardFileName(
-  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
-): string | null {
-  try {
-    const parsed = JSON.parse(display.input) as Record<string, unknown>;
-    const pathValue =
-      (typeof parsed.file_path === "string" && parsed.file_path) ||
-      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
-      undefined;
-    const fromInput = extractFileNameFromPathLike(pathValue);
-    if (fromInput) {
-      return fromInput;
-    }
-  } catch {
-    // Ignore non-JSON tool inputs and fall back to title/subtitle heuristics.
-  }
-
-  return (
-    extractFileNameFromPathLike(display.title) ??
-    extractFileNameFromPathLike(display.subtitle)
-  );
-}
-
-function getIOCardFilePath(
-  display: Extract<ChatToolDisplay, { kind: "input_output" }>,
-): string | undefined {
-  try {
-    const parsed = JSON.parse(display.input) as Record<string, unknown>;
-    const pathValue =
-      (typeof parsed.file_path === "string" && parsed.file_path) ||
-      (typeof parsed.notebook_path === "string" && parsed.notebook_path) ||
-      undefined;
-    if (pathValue) {
-      return pathValue;
-    }
-  } catch {
-    // Ignore non-JSON tool inputs and fall back to display metadata.
-  }
-
-  const titlePath =
-    typeof display.title === "string" ? display.title : undefined;
-  if (titlePath?.includes("/") || titlePath?.includes("\\")) {
-    return titlePath;
-  }
-  return undefined;
-}
-
-function getFileNameFromToolInput(input: JsonObject): string | null {
-  const pathValue =
-    (typeof input.file_path === "string" && input.file_path) ||
-    (typeof input.notebook_path === "string" && input.notebook_path) ||
-    undefined;
-  return extractFileNameFromPathLike(pathValue);
-}
-
-function getFilePathFromToolInput(input: JsonObject): string | undefined {
-  return (
-    (typeof input.file_path === "string" && input.file_path) ||
-    (typeof input.notebook_path === "string" && input.notebook_path) ||
-    undefined
-  );
-}
-
-function getReadNavigationLineFromToolInput(input: JsonObject): number {
-  const offsetValue = input.offset;
-  return typeof offsetValue === "number" && offsetValue > 0 ? offsetValue : 1;
-}
-
-/* ── Card wrapper (Codally-style bordered tool card) ── */
-
-function ToolCard({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`w-full overflow-hidden rounded-[8px] border border-border-500 bg-panel-500 ${className ?? ""}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function ToolCardHeader({
-  children,
-  onClick,
-  clickable = false,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  clickable?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center gap-2 px-2.5 py-1.5 text-[12px] ${clickable ? "cursor-pointer hover:bg-panel-400" : ""}`}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-}
-
-function ToolTitle({
-  children,
-  shimmer = false,
-  className,
-}: {
-  children: React.ReactNode;
-  shimmer?: boolean;
-  className?: string;
-}) {
-  return (
-    <span
-      className={`text-[12px] font-medium ${shimmer ? "tool-title-shimmer" : "text-foreground"} ${className ?? ""}`}
-    >
-      {children}
-    </span>
-  );
-}
-
-type ToolCardViewState = "collapsed" | "peek" | "expanded";
-
-const toolCardViewStateByKey = new Map<string, ToolCardViewState>();
-
-function useToolCardViewState(
-  stateKey: string | undefined,
-  initialState: ToolCardViewState,
-) {
-  const persistedState = stateKey
-    ? toolCardViewStateByKey.get(stateKey)
-    : undefined;
-  const [viewState, setViewState] = React.useState<ToolCardViewState>(
-    persistedState ?? initialState,
-  );
-
-  React.useEffect(() => {
-    if (!stateKey) return;
-    toolCardViewStateByKey.set(stateKey, viewState);
-  }, [stateKey, viewState]);
-
-  return [viewState, setViewState] as const;
-}
-
-/* ── Terminal / Bash card ── */
-
-function TerminalCard({
-  input,
-  display,
-  stateKey,
-}: {
-  toolName: string;
-  input: JsonObject;
-  display: Extract<ChatToolDisplay, { kind: "command" }> | undefined;
-  stateKey?: string;
-}) {
-  const command = display?.command || (input.command as string) || "";
-  const description = (input.description as string) || "";
-  const isRunning = display?.status === "running";
-  const exitCode = display?.exitCode;
-  const isComplete = !isRunning && exitCode != null;
-  const hasError = exitCode != null && exitCode !== 0;
-  const hasOutput = Boolean(display?.stdout || display?.stderr);
-  const hasPreview = Boolean(command || hasOutput || isComplete);
-  const [viewState, setViewState] = useToolCardViewState(
-    stateKey,
-    "collapsed",
-  );
-  const isExpanded = viewState === "expanded";
-
-  const headerLabel = isComplete
-    ? description
-      ? `\`${description}\``
-      : `Ran command`
-    : description
-      ? `Running \`${description}\``
-      : "Running command";
-
-  const toggleView = React.useCallback(() => {
-    if (!hasPreview) return;
-    setViewState((current) =>
-      current === "expanded" ? "collapsed" : "expanded",
-    );
-  }, [hasPreview, setViewState]);
-
-  return (
-    <ToolCard>
-      <ToolCardHeader onClick={toggleView} clickable={hasPreview}>
-        <SquareTerminal className="size-3 text-foreground/50" />
-        <ToolTitle className="min-w-0 truncate" shimmer={isRunning}>
-          {headerLabel.split(/`([^`]+)`/).map((part, i) =>
-            i % 2 === 1 ? (
-              <span key={i} className="rounded py-0.5 text-[11px]">
-                {part}
-              </span>
-            ) : (
-              <span key={i}>{part}</span>
-            ),
-          )}
-        </ToolTitle>
-        {isRunning && (
-          <span className="ml-auto size-2 rounded-full bg-sky animate-pulse" />
-        )}
-        {hasError && (
-          <span className="ml-auto text-[10px] text-red-400">
-            exit {exitCode}
-          </span>
-        )}
-        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
-      </ToolCardHeader>
-
-      {viewState !== "collapsed" && (
-        <div className="border-t border-border-500 bg-panel-500">
-          <div className="px-2.5 py-2 bg-panel-700">
-            <div className="font-mono text-[11px] leading-relaxed text-foreground/80">
-              <span className="text-placeholder select-none">$ </span>
-              {command}
-            </div>
-          </div>
-
-          {hasOutput && (
-            <TinyScrollArea
-              className="border-t border-border-500"
-              style={{ maxHeight: isExpanded ? 300 : 132 }}
-            >
-              {display?.stdout && (
-                <CodeBlock maxHeight={isExpanded ? 220 : 96} language="shell">
-                  {display.stdout}
-                </CodeBlock>
-              )}
-            </TinyScrollArea>
-          )}
-
-          {!hasOutput && isComplete && (
-            <div className="border-t border-border-500 px-2.5 py-1.5 text-[11px] text-placeholder italic">
-              No output
-            </div>
-          )}
-        </div>
-      )}
-    </ToolCard>
-  );
-}
-
-/* ── Diff card (Edit / Write) ── */
+/* ── Diff hunk view ── */
 
 function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
   const header = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
   return (
-    <div className="font-mono text-[11px] leading-[18px]">
-      <div className="bg-panel-500 px-2 py-0.5 text-placeholder">{header}</div>
+    <div>
+      <div className="bg-panel-600 px-2 py-0.5 text-placeholder text-[10px]">
+        {header}
+      </div>
       {hunk.lines.map((line, i) => {
         const prefix = line[0];
         let className = "whitespace-pre px-2";
@@ -404,7 +1018,7 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
         } else if (prefix === "-") {
           className += " bg-red-500/10 text-red-400";
         } else {
-          className += " text-foreground/70";
+          className += " text-foreground/60";
         }
         return (
           <div key={`${hunk.oldStart}-${i}`} className={className}>
@@ -416,572 +1030,135 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
   );
 }
 
-function getDiffNavigationLine(display: ChatToolDisplayDiff) {
-  const firstHunk = display.hunks[0];
-  if (!firstHunk) {
-    return 1;
-  }
-
-  return Math.max(1, firstHunk.newStart || firstHunk.oldStart || 1);
-}
-
-function DiffCard({
-  display,
-  onOpenFileAtLine,
-  stateKey,
-}: {
-  display: ChatToolDisplayDiff;
-  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
-  stateKey?: string;
-}) {
-  const hasHunks = display.hunks.length > 0;
-  const hasMonacoDiff =
-    display.action === "created"
-      ? Boolean(display.modifiedContent)
-      : display.originalContent !== undefined &&
-        display.modifiedContent !== undefined;
-  const fileName = display.filePath.split("/").pop() || display.filePath;
-  const hasPreview = hasHunks || Boolean(display.modifiedContent);
-  const [viewState, setViewState] = useToolCardViewState(
-    stateKey,
-    hasPreview ? "peek" : "collapsed",
-  );
-  const isExpanded = viewState === "expanded";
-
-  return (
-    <ToolCard>
-      <ToolCardHeader
-        onClick={() =>
-          hasPreview &&
-          setViewState((current) =>
-            current === "expanded" ? "peek" : "expanded",
-          )
-        }
-        clickable={hasPreview}
-      >
-        <FileIcon fileName={fileName} />
-        <button
-          type="button"
-          className="min-w-0 truncate text-[12px] text-foreground hover:underline"
-          onClick={(event) => {
-            event.stopPropagation();
-            void onOpenFileAtLine?.(
-              display.filePath,
-              getDiffNavigationLine(display),
-            );
-          }}
-          title={`Open ${display.filePath}`}
-        >
-          {fileName}
-        </button>
-        <span className="ml-auto flex gap-1.5 text-[11px] font-medium tabular-nums">
-          {display.additions > 0 && (
-            <span className="text-green-400">+{display.additions}</span>
-          )}
-          {display.deletions > 0 && (
-            <span className="text-red-400">-{display.deletions}</span>
-          )}
-        </span>
-        {hasPreview && <ChevronIcon state={viewState} />}
-      </ToolCardHeader>
-      {viewState !== "collapsed" &&
-        hasHunks &&
-        (hasMonacoDiff ? (
-          <div className="border-t border-border-500">
-            <MonacoDiffView
-              originalValue={display.originalContent ?? ""}
-              modifiedValue={display.modifiedContent ?? ""}
-              filePath={display.filePath}
-              maxHeight={isExpanded ? 400 : 140}
-            />
-          </div>
-        ) : (
-          <TinyScrollArea
-            className="border-t border-border-500"
-            contentClassName="divide-y divide-border-500"
-            style={{ maxHeight: isExpanded ? 400 : 140 }}
-          >
-            {display.hunks.map((hunk, i) => (
-              <DiffHunkView key={`hunk-${i}`} hunk={hunk} />
-            ))}
-          </TinyScrollArea>
-        ))}
-      {!hasHunks && display.action === "created" && (
-        <div className="border-t border-border-500">
-          {display.modifiedContent ? (
-            viewState !== "collapsed" ? (
-              <MonacoCodeView
-                value={display.modifiedContent}
-                filePath={display.filePath}
-                maxHeight={isExpanded ? 320 : 140}
-              />
-            ) : null
-          ) : (
-            <div className="px-2.5 py-1 text-[11px] text-placeholder">
-              New file created
-            </div>
-          )}
-        </div>
-      )}
-    </ToolCard>
-  );
-}
-
-/* ── IO card (Read, Grep, Write fallback, etc.) ── */
-
-function ReadHeader({
-  isRunning = false,
-}: {
-  isRunning?: boolean;
-}) {
-  return (
-    <>
-      <ToolTitle shimmer={isRunning} className="shrink-0">
-        {isRunning ? "Reading..." : "Read"}
-      </ToolTitle>
-    </>
-  );
-}
-
-function ReadFilePill({
-  fileName,
-  filePath,
-  line,
-  onOpenFileAtLine,
-}: {
-  fileName: string | null;
-  filePath?: string;
-  line: number;
-  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
-}) {
-  if (!fileName) {
-    return null;
-  }
-
-  const isClickable = Boolean(filePath && onOpenFileAtLine);
-  const className = `inline-flex min-w-0 items-center gap-1 rounded-md border border-border-500 px-2 py-1 text-[11px] text-foreground transition-colors ${
-    isClickable
-      ? "cursor-pointer hover:border-border-400 hover:bg-panel-400"
-      : ""
-  }`;
-  const content = (
-    <>
-      <FileIcon fileName={fileName} />
-      <span className="min-w-0 truncate text-[12px] -ml-1 text-foreground">
-        {fileName}
-      </span>
-    </>
-  );
-
-  if (!isClickable || !filePath) {
-    return <span className={className}>{content}</span>;
-  }
-
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={() => {
-        void onOpenFileAtLine?.(filePath, line);
-      }}
-      title={`Open ${filePath}`}
-    >
-      {content}
-    </button>
-  );
-}
-
-function ReadInline({
-  display,
-  onOpenFileAtLine,
-}: {
-  display: Extract<ChatToolDisplay, { kind: "input_output" }>;
-  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
-}) {
-  const fileName = getIOCardFileName(display);
-  const filePath = getIOCardFilePath(display);
-  return (
-    <div className="flex items-center gap-2 px-1 py-0.5">
-      <div className="flex min-w-0 items-center gap-2 text-[12px]">
-        <ReadHeader />
-        <ReadFilePill
-          fileName={fileName}
-          filePath={filePath}
-          line={1}
-          onOpenFileAtLine={onOpenFileAtLine}
-        />
-      </div>
-      {display.isError && <StatusDot status="error" />}
-    </div>
-  );
-}
-
-function IOCard({
-  display,
-  stateKey,
-}: {
-  display: Extract<ChatToolDisplay, { kind: "input_output" }>;
-  stateKey?: string;
-}) {
-  const hasOutput = Boolean(display.output);
-  const fileName = getIOCardFileName(display);
-  const filePath = getIOCardFilePath(display);
-  const [viewState, setViewState] = useToolCardViewState(
-    stateKey,
-    display.isError ? "expanded" : hasOutput ? "peek" : "collapsed",
-  );
-  const hasPreview = hasOutput;
-  const isExpanded = viewState === "expanded";
-
-  return (
-    <ToolCard>
-      <ToolCardHeader
-        onClick={() =>
-          hasPreview &&
-          setViewState((current) =>
-            current === "expanded" ? "peek" : "expanded",
-          )
-        }
-        clickable={hasPreview}
-      >
-        {fileName ? <FileIcon fileName={fileName} /> : null}
-        <span className="min-w-0 truncate text-[12px] -ml-1 text-foreground">
-          {fileName}
-        </span>
-        {display.isError && <StatusDot status={"error"} />}
-        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
-      </ToolCardHeader>
-      {viewState !== "collapsed" && (
-        <div className="border-t border-border-500">
-          {hasOutput && (
-            <CodeBlock maxHeight={isExpanded ? 300 : 132} filePath={filePath}>
-              {display.output!}
-            </CodeBlock>
-          )}
-        </div>
-      )}
-    </ToolCard>
-  );
-}
-
-/* ── File list / result list card (Glob, WebSearch) ── */
-
-function normalizeFileListItems(items: ChatToolDisplayFileList["items"]) {
-  return items.map((item) =>
-    typeof item === "string" ? { value: item } : item,
-  );
-}
-
-function ListCard({
-  display,
-  toolName,
-  stateKey,
-}: {
-  display: ChatToolDisplayFileList;
-  toolName: string;
-  stateKey?: string;
-}) {
-  const items = normalizeFileListItems(display.items);
-  const title = display.title || toolName;
-  const hasPreview = items.length > 0;
-  const [viewState, setViewState] = useToolCardViewState(
-    stateKey,
-    "collapsed",
-  );
-
-  return (
-    <ToolCard>
-      <ToolCardHeader
-        onClick={() =>
-          hasPreview &&
-          setViewState((current) =>
-            current === "expanded" ? "collapsed" : "expanded",
-          )
-        }
-        clickable={hasPreview}
-      >
-        <Search className="size-3 text-foreground/50" />
-        <span className="min-w-0 truncate text-[12px] text-foreground">
-          {title}
-        </span>
-
-        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
-      </ToolCardHeader>
-      {viewState !== "collapsed" && (
-        <TinyScrollArea
-          className="border-t border-border-500"
-          style={{ maxHeight: 300 }}
-        >
-          <div className="divide-y divide-border-500/50">
-            {items.map((item) => (
-              <div key={item.value} className="px-2.5 py-1.5 text-[11.5px]">
-                <div className="text-foreground break-all font-mono">
-                  {item.title ?? shortenPath(item.value)}
-                </div>
-                {item.description && (
-                  <div className="mt-0.5 whitespace-pre-wrap break-words text-[10px] text-placeholder">
-                    {item.description}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {display.truncated && (
-            <div className="px-2.5 py-1 text-[10px] text-placeholder">
-              Results truncated
-            </div>
-          )}
-        </TinyScrollArea>
-      )}
-    </ToolCard>
-  );
-}
-
-/* ── Todo list card ── */
-
-const TODO_STATUS_ICONS: Record<string, string> = {
-  pending: "○",
-  in_progress: "◑",
-  completed: "●",
-  cancelled: "✕",
-};
-
-function TodoCard({
-  display,
-}: {
-  display: Extract<ChatToolDisplay, { kind: "todo_list" }>;
-}) {
-  return (
-    <ToolCard>
-      <ToolCardHeader>
-        <span className="text-[12px]">☑️</span>
-        <span className="text-[12px] font-medium text-foreground">
-          {display.title ?? "Tasks"}
-        </span>
-      </ToolCardHeader>
-      <div className="border-t border-border-500 divide-y divide-border-500">
-        {display.items.map((item) => (
-          <div
-            key={item.id}
-            className="flex items-center gap-2 px-2.5 py-1.5 text-[11.5px]"
-          >
-            <span className="text-placeholder">
-              {TODO_STATUS_ICONS[item.status] ?? "○"}
-            </span>
-            <span
-              className={`flex-1 ${item.status === "completed" ? "text-placeholder line-through" : item.status === "cancelled" ? "text-placeholder" : "text-foreground"}`}
-            >
-              {item.content}
-            </span>
-          </div>
-        ))}
-      </div>
-    </ToolCard>
-  );
-}
-
-/* ── Standalone tool_use card (when no paired result yet) ── */
-
-function ToolInvocationCard({
-  toolName,
-  input,
-  onOpenFileAtLine,
-}: {
-  toolName: string;
-  input: JsonObject;
-  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
-}) {
-  if (toolName === "Read") {
-    const fileName = getFileNameFromToolInput(input);
-    const filePath = getFilePathFromToolInput(input);
-    const navigationLine = getReadNavigationLineFromToolInput(input);
-
-    return (
-      <div className="flex items-center gap-2 px-1 py-0.5">
-        <ToolTitle shimmer className="min-w-0 truncate text-[12px]">
-          Reading...
-        </ToolTitle>
-        <ReadFilePill
-          fileName={fileName}
-          filePath={filePath}
-          line={navigationLine}
-          onOpenFileAtLine={onOpenFileAtLine}
-        />
-        <span className="size-2 rounded-full bg-sky animate-pulse" />
-      </div>
-    );
-  }
-
-  const summary = summarizeToolInput(toolName, input);
-
-  return (
-    <ToolCard>
-      <ToolCardHeader>
-        <span className="size-2 rounded-full bg-sky animate-pulse" />
-        <ToolTitle shimmer>{toolName}</ToolTitle>
-        {summary && (
-          <span className="min-w-0 truncate text-[11px] text-placeholder">
-            {summary}
-          </span>
-        )}
-      </ToolCardHeader>
-    </ToolCard>
-  );
-}
-
 /* ── Main renderer ── */
 
 export function ToolMessageRenderer({
   message,
   onOpenFileAtLine,
   pairedResult,
+  isLast = false,
 }: {
   message: ChatMessage;
   onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
   pairedResult?: ChatMessage;
+  isLast?: boolean;
 }) {
-  // Paired tool_use + tool_result → single card
   if (message.subtype === "tool_use" && message.toolInvocation) {
-    const { toolName, input } = message.toolInvocation;
+    const { toolName, input, toolCallId } = message.toolInvocation;
     const result = pairedResult?.toolResult;
 
-    if (!result) {
-      return (
-        <ToolInvocationCard
-          toolName={toolName}
-          input={input}
-          onOpenFileAtLine={onOpenFileAtLine}
-        />
-      );
-    }
-
-    const display = result.display;
-
-    if (!display) {
-      return (
-        <ToolCard>
-          <ToolCardHeader>
-            <StatusDot status={result.isError ? "error" : "success"} />
-            <ToolTitle>{toolName}</ToolTitle>
-          </ToolCardHeader>
-          <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight={300}>{result.outputText}</CodeBlock>
-          </div>
-        </ToolCard>
-      );
-    }
+    const action = buildToolAction(
+      toolName,
+      input,
+      result
+        ? {
+            display: result.display,
+            isError: result.isError,
+            outputText: result.outputText,
+          }
+        : undefined,
+      result?.toolCallId ?? toolCallId,
+    );
 
     return (
-      <ToolDisplayCard
-        display={display}
-        toolName={toolName}
-        input={input}
-        onOpenFileAtLine={onOpenFileAtLine}
-        stateKey={result.toolCallId}
-      />
+      <TimelineRow
+        icon={action.icon}
+        label={action.label}
+        isLast={isLast}
+        onOpenFileAtLine={action.filePath ? onOpenFileAtLine : undefined}
+        filePath={undefined}
+        fileLine={action.fileLine}
+        previewStateKey={action.previewStateKey}
+      >
+        {action.preview}
+      </TimelineRow>
     );
   }
 
-  // Standalone tool_result (no paired tool_use found)
   if (message.subtype === "tool_result" && message.toolResult) {
-    const { display, toolName, input, outputText, isError } =
+    const { toolName, input, display, outputText, isError, toolCallId } =
       message.toolResult;
-    if (!display) {
-      return (
-        <ToolCard>
-          <ToolCardHeader>
-            <StatusDot status={isError ? "error" : "success"} />
-            <ToolTitle>{toolName}</ToolTitle>
-          </ToolCardHeader>
-          <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight={300}>{outputText}</CodeBlock>
-          </div>
-        </ToolCard>
-      );
-    }
+
+    const action = buildToolAction(
+      toolName,
+      input,
+      { display, isError, outputText },
+      toolCallId,
+    );
+
     return (
-      <ToolDisplayCard
-        display={display}
-        toolName={toolName}
-        input={input}
-        onOpenFileAtLine={onOpenFileAtLine}
-        stateKey={message.toolResult.toolCallId}
-      />
+      <TimelineRow
+        icon={action.icon}
+        label={action.label}
+        isLast={isLast}
+        onOpenFileAtLine={action.filePath ? onOpenFileAtLine : undefined}
+        filePath={undefined}
+        fileLine={action.fileLine}
+        previewStateKey={action.previewStateKey}
+      >
+        {action.preview}
+      </TimelineRow>
     );
   }
 
   return null;
 }
 
-function ToolDisplayCard({
-  display,
-  toolName,
-  input,
-  onOpenFileAtLine,
-  stateKey,
+/* ── Thinking timeline row (exported for ChatPanel) ── */
+
+export function ThinkingTimelineRow({
+  isStreaming,
+  isLast = false,
+  children,
 }: {
-  display: ChatToolDisplay;
-  toolName: string;
-  input: JsonObject;
-  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
-  stateKey?: string;
+  isStreaming: boolean;
+  isLast?: boolean;
+  children?: React.ReactNode;
 }) {
-  switch (display.kind) {
-    case "command":
-      return (
-        <TerminalCard
-          toolName={toolName}
-          input={input}
-          display={display}
-          stateKey={stateKey}
-        />
-      );
-    case "diff":
-      return (
-        <DiffCard
-          display={display}
-          onOpenFileAtLine={onOpenFileAtLine}
-          stateKey={stateKey}
-        />
-      );
-    case "input_output":
-      return toolName === "Read" ? (
-        <ReadInline display={display} onOpenFileAtLine={onOpenFileAtLine} />
-      ) : (
-        <IOCard display={display} stateKey={stateKey} />
-      );
-    case "file_list":
-      return (
-        <ListCard display={display} toolName={toolName} stateKey={stateKey} />
-      );
-    case "todo_list":
-      return <TodoCard display={display} />;
-    case "json":
-      return (
-        <ToolCard>
-          <ToolCardHeader>
-            <StatusDot status="success" />
-            <ToolTitle>{toolName}</ToolTitle>
-          </ToolCardHeader>
-          <div className="border-t border-border-500 px-2.5 py-2">
-            <CodeBlock maxHeight={300} language="json">
-              {JSON.stringify(display.value, null, 2)}
-            </CodeBlock>
-          </div>
-        </ToolCard>
-      );
-    case "text":
-    default:
-      return (
-        <ToolCard>
-          <ToolCardHeader>
-            <StatusDot status="success" />
-            <ToolTitle>{toolName}</ToolTitle>
-          </ToolCardHeader>
-          <div className="border-t border-border-500 px-2.5 py-2 text-[12px] text-foreground whitespace-pre-wrap">
-            {display.text}
-          </div>
-        </ToolCard>
-      );
-  }
+  return (
+    <div className="relative flex gap-3 pb-0.5">
+      {!isLast && (
+        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
+      )}
+      <ThinkingDot />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 pb-3">
+        <div className="flex min-h-[20px] items-center">
+          <span className="text-[12.5px] text-foreground/60">
+            {isStreaming ? (
+              <span className="tool-title-shimmer">
+                Thinking through the process
+              </span>
+            ) : (
+              "Thought process"
+            )}
+          </span>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ── Loading/working timeline row (exported for ChatPanel) ── */
+
+export function WorkingTimelineRow({
+  text = "Working...",
+  isLast = false,
+}: {
+  text?: string;
+  isLast?: boolean;
+}) {
+  return (
+    <div className="relative flex gap-3 pb-0.5">
+      {!isLast && (
+        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
+      )}
+      <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center">
+        <Loader2 className="size-4 animate-spin text-foreground/50" />
+      </div>
+      <div className="flex min-h-[20px] items-center pb-3">
+        <span className="text-[12.5px] tool-title-shimmer">{text}</span>
+      </div>
+    </div>
+  );
 }

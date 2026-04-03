@@ -1,976 +1,1019 @@
 import {
-	type ChatMessage,
-	type ChatSession,
-	chatService,
+  type ChatMessage,
+  type ChatSession,
+  chatService,
 } from "@/lib/chat-service";
 import { parseAssistantRenderableContent } from "@/lib/chat/render-message-content";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
-import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
+import {
+  ToolMessageRenderer,
+  ThinkingTimelineRow,
+  WorkingTimelineRow,
+} from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 import type { ChatMode } from "@/lib/chat/types";
 import {
-	LLAMA_MODEL_CATALOG_FALLBACK,
-	type LlamaModelEntry,
-	fetchModelCatalog,
+  LLAMA_MODEL_CATALOG_FALLBACK,
+  type LlamaModelEntry,
+  fetchModelCatalog,
 } from "@/lib/model-catalog";
 import type { PullProgressEvent } from "@/lib/model-downloads";
 import {
-	type LlamaInstalledModelInfo,
-	llamaServerService,
+  type LlamaInstalledModelInfo,
+  llamaServerService,
 } from "@/lib/server-service";
 import { buildToolMessagePairingIndex } from "@/ui/higher/tool-message-pairing";
 import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
 import { Modal } from "@/ui/lower/Modal";
 import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
 import {
-	AlertCircle,
-	ChevronDown,
-	Clock,
-	Download,
-	ImageIcon,
-	Loader2,
-	Mic,
-	MoreHorizontal,
-	Plus,
-	Square,
-	X,
+  AlertCircle,
+  ChevronDown,
+  Clock,
+  Download,
+  ImageIcon,
+  Loader2,
+  Mic,
+  MoreHorizontal,
+  Plus,
+  Square,
+  X,
 } from "lucide-react";
 import * as React from "react";
 
 interface ChatPanelProps {
-	className?: string;
-	onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  className?: string;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
 }
 
 export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
-	const [sessions, setSessions] = React.useState<ChatSession[]>([]);
-	const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
-		null,
-	);
-	const [inputValue, setInputValue] = React.useState("");
-	const [isStreaming, setIsStreaming] = React.useState(false);
-	const [installedModels, setInstalledModels] = React.useState<
-		LlamaInstalledModelInfo[]
-	>([]);
-	const [selectedModel, setSelectedModel] =
-		React.useState<LlamaInstalledModelInfo | null>(null);
-	const [serverStatus, setServerStatus] = React.useState<
-		"stopped" | "starting" | "running" | "error"
-	>("stopped");
-	const [showModelPicker, setShowModelPicker] = React.useState(false);
-	const [showModePicker, setShowModePicker] = React.useState(false);
-	const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
-	const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
-	const [downloadCatalog, setDownloadCatalog] = React.useState<
-		LlamaModelEntry[]
-	>(LLAMA_MODEL_CATALOG_FALLBACK);
-	const [downloadProgress, setDownloadProgress] = React.useState<
-		Map<string, PullProgressEvent>
-	>(new Map());
-	const [isLoadingModel, setIsLoadingModel] = React.useState(false);
-	const [streamingText, setStreamingText] = React.useState<string | null>(null);
-	const [modePickerPos, setModePickerPos] = React.useState<{
-		top: number;
-		left: number;
-	} | null>(null);
-	const [modelPickerPos, setModelPickerPos] = React.useState<{
-		top: number;
-		left: number;
-	} | null>(null);
-	const messagesEndRef = React.useRef<HTMLDivElement>(null);
-	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-	const modelPickerRef = React.useRef<HTMLDivElement>(null);
-	const modePickerRef = React.useRef<HTMLDivElement>(null);
-	const modeButtonRef = React.useRef<HTMLButtonElement>(null);
-	const modelButtonRef = React.useRef<HTMLButtonElement>(null);
-	const activeSessionIdRef = React.useRef<string | null>(null);
-	const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
+  const [sessions, setSessions] = React.useState<ChatSession[]>([]);
+  const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
+    null,
+  );
+  const [inputValue, setInputValue] = React.useState("");
+  const [isStreaming, setIsStreaming] = React.useState(false);
+  const [installedModels, setInstalledModels] = React.useState<
+    LlamaInstalledModelInfo[]
+  >([]);
+  const [selectedModel, setSelectedModel] =
+    React.useState<LlamaInstalledModelInfo | null>(null);
+  const [serverStatus, setServerStatus] = React.useState<
+    "stopped" | "starting" | "running" | "error"
+  >("stopped");
+  const [showModelPicker, setShowModelPicker] = React.useState(false);
+  const [showModePicker, setShowModePicker] = React.useState(false);
+  const [chatMode, setChatMode] = React.useState<ChatMode>("Agent");
+  const [showDownloadPanel, setShowDownloadPanel] = React.useState(false);
+  const [downloadCatalog, setDownloadCatalog] = React.useState<
+    LlamaModelEntry[]
+  >(LLAMA_MODEL_CATALOG_FALLBACK);
+  const [downloadProgress, setDownloadProgress] = React.useState<
+    Map<string, PullProgressEvent>
+  >(new Map());
+  const [isLoadingModel, setIsLoadingModel] = React.useState(false);
+  const [streamingText, setStreamingText] = React.useState<string | null>(null);
+  const [modePickerPos, setModePickerPos] = React.useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [modelPickerPos, setModelPickerPos] = React.useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const modelPickerRef = React.useRef<HTMLDivElement>(null);
+  const modePickerRef = React.useRef<HTMLDivElement>(null);
+  const modeButtonRef = React.useRef<HTMLButtonElement>(null);
+  const modelButtonRef = React.useRef<HTMLButtonElement>(null);
+  const activeSessionIdRef = React.useRef<string | null>(null);
+  const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
 
-	React.useEffect(() => {
-		const checkServer = async () => {
-			const healthy = await llamaServerService.isServerHealthy();
-			if (healthy) {
-				setServerStatus("running");
-				const models = await chatService.getInstalledModels();
-				setInstalledModels(models);
-				if (models.length > 0 && !selectedModel) {
-					setSelectedModel(models[0]);
-					chatService.currentModel = models[0];
-					setIsLoadingModel(true);
-					try {
-						await llamaServerService.loadModel(models[0].id);
-					} catch (error) {
-						console.error("Failed to load initial model:", error);
-					} finally {
-						setIsLoadingModel(false);
-					}
-				}
-			}
-		};
-		checkServer();
+  React.useEffect(() => {
+    const checkServer = async () => {
+      const healthy = await llamaServerService.isServerHealthy();
+      if (healthy) {
+        setServerStatus("running");
+        const models = await chatService.getInstalledModels();
+        setInstalledModels(models);
+        if (models.length > 0 && !selectedModel) {
+          setSelectedModel(models[0]);
+          chatService.currentModel = models[0];
+          setIsLoadingModel(true);
+          try {
+            await llamaServerService.loadModel(models[0].id);
+          } catch (error) {
+            console.error("Failed to load initial model:", error);
+          } finally {
+            setIsLoadingModel(false);
+          }
+        }
+      }
+    };
+    checkServer();
 
-		const unsubStatus = llamaServerService.onDidChangeStatus((status) => {
-			setServerStatus(status);
-		});
+    const unsubStatus = llamaServerService.onDidChangeStatus((status) => {
+      setServerStatus(status);
+    });
 
-		const unsubSession = chatService.onDidUpdateSession(() => {
-			setSessions([...chatService.sessions]);
-			const nextActive = chatService.activeSession;
-			activeSessionIdRef.current = nextActive?.id ?? null;
-			setActiveSession(nextActive ? { ...nextActive } : null);
-			if (nextActive) {
-				setChatMode(nextActive.mode);
-				setIsStreaming(chatService.streamingSessionId === nextActive.id);
-			} else {
-				setIsStreaming(false);
-			}
-		});
+    const unsubSession = chatService.onDidUpdateSession(() => {
+      setSessions([...chatService.sessions]);
+      const nextActive = chatService.activeSession;
+      activeSessionIdRef.current = nextActive?.id ?? null;
+      setActiveSession(nextActive ? { ...nextActive } : null);
+      if (nextActive) {
+        setChatMode(nextActive.mode);
+        setIsStreaming(chatService.streamingSessionId === nextActive.id);
+      } else {
+        setIsStreaming(false);
+      }
+    });
 
-		const unsubStream = chatService.onDidStreamEvent((event) => {
-			handleChatStreamEvent(event, {
-				onMessage: ({ sessionId }) => {
-					if (sessionId !== activeSessionIdRef.current) return;
-					setStreamingText(null);
-					setIsStreaming(false);
-				},
-				onSetStreamMode: (mode) => {
-					if (event.sessionId !== activeSessionIdRef.current) return;
-					setIsStreaming(mode !== "idle");
-				},
-				onStreamingText: (updater) => {
-					if (event.sessionId !== activeSessionIdRef.current) return;
-					setStreamingText(updater);
-				},
-			});
-		});
+    const unsubStream = chatService.onDidStreamEvent((event) => {
+      handleChatStreamEvent(event, {
+        onMessage: ({ sessionId }) => {
+          if (sessionId !== activeSessionIdRef.current) return;
+          setStreamingText(null);
+          setIsStreaming(false);
+        },
+        onSetStreamMode: (mode) => {
+          if (event.sessionId !== activeSessionIdRef.current) return;
+          setIsStreaming(mode !== "idle");
+        },
+        onStreamingText: (updater) => {
+          if (event.sessionId !== activeSessionIdRef.current) return;
+          setStreamingText(updater);
+        },
+      });
+    });
 
-		const unsubPull = llamaServerService.onDidPullProgress((event) => {
-			setDownloadProgress((prev) => {
-				const next = new Map(prev);
-				next.set(event.modelId, event);
-				return next;
-			});
+    const unsubPull = llamaServerService.onDidPullProgress((event) => {
+      setDownloadProgress((prev) => {
+        const next = new Map(prev);
+        next.set(event.modelId, event);
+        return next;
+      });
 
-			const existingTimer = downloadDismissTimersRef.current.get(event.modelId);
-			if (existingTimer) {
-				window.clearTimeout(existingTimer);
-				downloadDismissTimersRef.current.delete(event.modelId);
-			}
+      const existingTimer = downloadDismissTimersRef.current.get(event.modelId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+        downloadDismissTimersRef.current.delete(event.modelId);
+      }
 
-			if (
-				event.phase === "complete" ||
-				event.phase === "error" ||
-				event.phase === "cancelled"
-			) {
-				const timeoutId = window.setTimeout(() => {
-					setDownloadProgress((prev) => {
-						const next = new Map(prev);
-						next.delete(event.modelId);
-						return next;
-					});
-					downloadDismissTimersRef.current.delete(event.modelId);
-				}, 4000);
-				downloadDismissTimersRef.current.set(event.modelId, timeoutId);
-			}
-		});
+      if (
+        event.phase === "complete" ||
+        event.phase === "error" ||
+        event.phase === "cancelled"
+      ) {
+        const timeoutId = window.setTimeout(() => {
+          setDownloadProgress((prev) => {
+            const next = new Map(prev);
+            next.delete(event.modelId);
+            return next;
+          });
+          downloadDismissTimersRef.current.delete(event.modelId);
+        }, 4000);
+        downloadDismissTimersRef.current.set(event.modelId, timeoutId);
+      }
+    });
 
-		const session = chatService.ensureSession();
-		activeSessionIdRef.current = session.id;
-		setActiveSession(session);
-		setSessions([...chatService.sessions]);
-		setChatMode(session.mode);
+    const session = chatService.ensureSession();
+    activeSessionIdRef.current = session.id;
+    setActiveSession(session);
+    setSessions([...chatService.sessions]);
+    setChatMode(session.mode);
 
-		return () => {
-			unsubStatus();
-			unsubSession();
-			unsubStream();
-			unsubPull();
-			for (const timeoutId of downloadDismissTimersRef.current.values()) {
-				window.clearTimeout(timeoutId);
-			}
-			downloadDismissTimersRef.current.clear();
-		};
-	}, [selectedModel]);
+    return () => {
+      unsubStatus();
+      unsubSession();
+      unsubStream();
+      unsubPull();
+      for (const timeoutId of downloadDismissTimersRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      downloadDismissTimersRef.current.clear();
+    };
+  }, [selectedModel]);
 
-	React.useEffect(() => {
-		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [activeSession?.messages, streamingText, isStreaming]);
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeSession?.messages, streamingText, isStreaming]);
 
-	React.useEffect(() => {
-		activeSessionIdRef.current = activeSession?.id ?? null;
-	}, [activeSession?.id]);
+  React.useEffect(() => {
+    activeSessionIdRef.current = activeSession?.id ?? null;
+  }, [activeSession?.id]);
 
-	React.useEffect(() => {
-		const handleClickOutside = (e: MouseEvent) => {
-			const target = e.target as Node;
-			if (
-				showModelPicker &&
-				modelPickerRef.current &&
-				!modelPickerRef.current.contains(target)
-			) {
-				setShowModelPicker(false);
-			}
-			if (
-				showModePicker &&
-				modePickerRef.current &&
-				!modePickerRef.current.contains(target)
-			) {
-				setShowModePicker(false);
-			}
-		};
-		const handleScroll = () => {
-			setShowModelPicker(false);
-			setShowModePicker(false);
-		};
-		document.addEventListener("mousedown", handleClickOutside);
-		window.addEventListener("resize", handleScroll);
-		return () => {
-			document.removeEventListener("mousedown", handleClickOutside);
-			window.removeEventListener("resize", handleScroll);
-		};
-	}, [showModelPicker, showModePicker]);
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        showModelPicker &&
+        modelPickerRef.current &&
+        !modelPickerRef.current.contains(target)
+      ) {
+        setShowModelPicker(false);
+      }
+      if (
+        showModePicker &&
+        modePickerRef.current &&
+        !modePickerRef.current.contains(target)
+      ) {
+        setShowModePicker(false);
+      }
+    };
+    const handleScroll = () => {
+      setShowModelPicker(false);
+      setShowModePicker(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, [showModelPicker, showModePicker]);
 
-	const handleSend = async () => {
-		const trimmed = inputValue.trim();
-		if (!trimmed || isStreaming) return;
+  const handleSend = async () => {
+    const trimmed = inputValue.trim();
+    if (!trimmed || isStreaming) return;
 
-		setInputValue("");
-		if (textareaRef.current) {
-			textareaRef.current.style.height = "auto";
-		}
+    setInputValue("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
 
-		await chatService.sendMessage(trimmed, { mode: chatMode });
-	};
+    await chatService.sendMessage(trimmed, { mode: chatMode });
+  };
 
-	const handleStopGeneration = () => {
-		chatService.stopGeneration();
-	};
+  const handleStopGeneration = () => {
+    chatService.stopGeneration();
+  };
 
-	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-		if (e.key === "Enter" && !e.shiftKey) {
-			e.preventDefault();
-			handleSend();
-		}
-	};
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
 
-	const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-		setInputValue(e.target.value);
-		const textarea = e.target;
-		textarea.style.height = "auto";
-		textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-	};
+  const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+    const textarea = e.target;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+  };
 
-	const handleNewChat = () => {
-		const session = chatService.createSession();
-		activeSessionIdRef.current = session.id;
-		setActiveSession(session);
-		setSessions([...chatService.sessions]);
-		setChatMode(session.mode);
-		setInputValue("");
-		setStreamingText(null);
-	};
+  const handleNewChat = () => {
+    const session = chatService.createSession();
+    activeSessionIdRef.current = session.id;
+    setActiveSession(session);
+    setSessions([...chatService.sessions]);
+    setChatMode(session.mode);
+    setInputValue("");
+    setStreamingText(null);
+  };
 
-	const handleSelectModel = async (model: LlamaInstalledModelInfo) => {
-		console.log("[ChatPanel] handleSelectModel:", model.id, model.displayName);
-		setSelectedModel(model);
-		chatService.currentModel = model;
-		setShowModelPicker(false);
-		setIsLoadingModel(true);
-		try {
-			console.log("[ChatPanel] calling loadModel...");
-			await llamaServerService.loadModel(model.id);
-			console.log("[ChatPanel] loadModel done ✓");
-		} catch (error) {
-			console.error("[ChatPanel] Failed to load model:", error);
-		} finally {
-			setIsLoadingModel(false);
-			console.log("[ChatPanel] isLoadingModel → false");
-		}
-	};
+  const handleSelectModel = async (model: LlamaInstalledModelInfo) => {
+    console.log("[ChatPanel] handleSelectModel:", model.id, model.displayName);
+    setSelectedModel(model);
+    chatService.currentModel = model;
+    setShowModelPicker(false);
+    setIsLoadingModel(true);
+    try {
+      console.log("[ChatPanel] calling loadModel...");
+      await llamaServerService.loadModel(model.id);
+      console.log("[ChatPanel] loadModel done ✓");
+    } catch (error) {
+      console.error("[ChatPanel] Failed to load model:", error);
+    } finally {
+      setIsLoadingModel(false);
+      console.log("[ChatPanel] isLoadingModel → false");
+    }
+  };
 
-	const handleDownloadModel = async (entry: LlamaModelEntry) => {
-		setShowDownloadPanel(false);
-		try {
-			const installedModel = await llamaServerService.pullModel(
-				entry.id,
-				entry.quantization,
-			);
-			const models = await chatService.getInstalledModels();
-			setInstalledModels(models);
-			if (installedModel) {
-				setSelectedModel(installedModel);
-				chatService.currentModel = installedModel;
-			}
-		} catch (error) {
-			if (error instanceof Error && /cancelled/i.test(error.message)) {
-				return;
-			}
-			console.error("Download failed:", error);
-		}
-	};
+  const handleDownloadModel = async (entry: LlamaModelEntry) => {
+    setShowDownloadPanel(false);
+    try {
+      const installedModel = await llamaServerService.pullModel(
+        entry.id,
+        entry.quantization,
+      );
+      const models = await chatService.getInstalledModels();
+      setInstalledModels(models);
+      if (installedModel) {
+        setSelectedModel(installedModel);
+        chatService.currentModel = installedModel;
+      }
+    } catch (error) {
+      if (error instanceof Error && /cancelled/i.test(error.message)) {
+        return;
+      }
+      console.error("Download failed:", error);
+    }
+  };
 
-	const handleFetchCatalog = async () => {
-		setShowModelPicker(false);
-		setShowDownloadPanel(true);
-		try {
-			const catalog = await fetchModelCatalog();
-			setDownloadCatalog(catalog);
-		} catch {
-			setDownloadCatalog(LLAMA_MODEL_CATALOG_FALLBACK);
-		}
-	};
+  const handleFetchCatalog = async () => {
+    setShowModelPicker(false);
+    setShowDownloadPanel(true);
+    try {
+      const catalog = await fetchModelCatalog();
+      setDownloadCatalog(catalog);
+    } catch {
+      setDownloadCatalog(LLAMA_MODEL_CATALOG_FALLBACK);
+    }
+  };
 
-	const handleCancelDownload = async (modelId: string) => {
-		try {
-			await llamaServerService.cancelPullModel(modelId);
-		} catch (error) {
-			console.error("Failed to cancel download:", error);
-		}
-	};
+  const handleCancelDownload = async (modelId: string) => {
+    try {
+      await llamaServerService.cancelPullModel(modelId);
+    } catch (error) {
+      console.error("Failed to cancel download:", error);
+    }
+  };
 
-	const getDownloadEntryName = React.useCallback(
-		(modelId: string) =>
-			downloadCatalog.find((entry) => entry.id === modelId)?.name ??
-			modelId
-				.split("/")
-				.pop()
-				?.replace(/-GGUF$/i, "")
-				.replace(/-/g, " ") ??
-			modelId,
-		[downloadCatalog],
-	);
+  const getDownloadEntryName = React.useCallback(
+    (modelId: string) =>
+      downloadCatalog.find((entry) => entry.id === modelId)?.name ??
+      modelId
+        .split("/")
+        .pop()
+        ?.replace(/-GGUF$/i, "")
+        .replace(/-/g, " ") ??
+      modelId,
+    [downloadCatalog],
+  );
 
-	const getDownloadMessage = React.useCallback((event: PullProgressEvent) => {
-		if (typeof event.progress === "number" && event.phase === "downloading") {
-			return `${event.message} · ${Math.round(event.progress)}%`;
-		}
-		return event.message;
-	}, []);
+  const getDownloadMessage = React.useCallback((event: PullProgressEvent) => {
+    if (typeof event.progress === "number" && event.phase === "downloading") {
+      return `${event.message} · ${Math.round(event.progress)}%`;
+    }
+    return event.message;
+  }, []);
 
-	const messages = activeSession?.messages ?? [];
-	const visibleStreamingText = streamingText;
-	const activeDownloads = Array.from(downloadProgress.values());
-	const toolMessagePairing = React.useMemo(
-		() => buildToolMessagePairingIndex(messages),
-		[messages],
-	);
+  const messages = activeSession?.messages ?? [];
+  const visibleStreamingText = streamingText;
+  const activeDownloads = Array.from(downloadProgress.values());
+  const toolMessagePairing = React.useMemo(
+    () => buildToolMessagePairingIndex(messages),
+    [messages],
+  );
 
-	return (
-		<div
-			className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
-		>
-			{/* Tab bar */}
-			<div className="flex h-[35px] shrink-0 items-center justify-between border-b border-border-500 px-1">
-				<TinyScrollArea
-					direction="horizontal"
-					className="min-w-0 flex-1"
-					contentClassName="flex items-center"
-				>
-					{sessions.map((session) => (
-						<div
-							key={session.id}
-							className={`group flex items-center gap-1 border-b-2 border-transparent bg-transparent pl-3 pr-1 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
-						>
-							<button
-								type="button"
-								className="cursor-pointer whitespace-nowrap bg-transparent py-1.5 text-left"
-								onClick={() => {
-									chatService.setActiveSession(session.id);
-									activeSessionIdRef.current = session.id;
-									setActiveSession(chatService.activeSession);
-									setStreamingText(null);
-								}}
-							>
-								{session.title}
-							</button>
-							<button
-								type="button"
-								className={`rounded p-0.5 transition-colors hover:bg-border-500 hover:text-foreground ${session.id === activeSession?.id ? "text-foreground/50" : "text-transparent group-hover:text-foreground/35"}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									chatService.closeSession(session.id);
-									setStreamingText(null);
-								}}
-								aria-label={`Close ${session.title}`}
-								title={`Close ${session.title}`}
-							>
-								<X className="h-3.5 w-3.5" />
-							</button>
-						</div>
-					))}
-				</TinyScrollArea>
-				<div className="flex shrink-0 items-center gap-0.5 px-1">
-					<button
-						className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
-						onClick={handleNewChat}
-					>
-						<Plus className="h-3.5 w-3.5" />
-					</button>
-					<button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
-						<Clock className="h-3.5 w-3.5" />
-					</button>
-					<button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
-						<MoreHorizontal className="h-3.5 w-3.5" />
-					</button>
-				</div>
-			</div>
+  return (
+    <div
+      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
+    >
+      {/* Tab bar */}
+      <div className="flex h-[35px] shrink-0 items-center justify-between border-b border-border-500 px-1">
+        <TinyScrollArea
+          direction="horizontal"
+          className="min-w-0 flex-1"
+          contentClassName="flex items-center"
+        >
+          {sessions.map((session) => (
+            <div
+              key={session.id}
+              className={`group flex items-center gap-1 border-b-2 border-transparent bg-transparent pl-3 pr-1 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
+            >
+              <button
+                type="button"
+                className="cursor-pointer whitespace-nowrap bg-transparent py-1.5 text-left"
+                onClick={() => {
+                  chatService.setActiveSession(session.id);
+                  activeSessionIdRef.current = session.id;
+                  setActiveSession(chatService.activeSession);
+                  setStreamingText(null);
+                }}
+              >
+                {session.title}
+              </button>
+              <button
+                type="button"
+                className={`rounded p-0.5 transition-colors hover:bg-border-500 hover:text-foreground ${session.id === activeSession?.id ? "text-foreground/50" : "text-transparent group-hover:text-foreground/35"}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  chatService.closeSession(session.id);
+                  setStreamingText(null);
+                }}
+                aria-label={`Close ${session.title}`}
+                title={`Close ${session.title}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </TinyScrollArea>
+        <div className="flex shrink-0 items-center gap-0.5 px-1">
+          <button
+            className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+            onClick={handleNewChat}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          <button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
+            <Clock className="h-3.5 w-3.5" />
+          </button>
+          <button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
 
-			{/* Input area at top */}
-			<div className="flex shrink-0 flex-col gap-1 px-3 py-2">
-				<div className="relative box-border w-full cursor-text rounded-[10px] border border-border-500 bg-panel-600 px-1.5 pb-1.5 focus-within:border-sky">
-					<textarea
-						ref={textareaRef}
-						className="w-full min-h-[60px] max-h-[200px] resize-none border-none bg-transparent px-1.5 pt-2.5 pb-1 text-[13px] font-[inherit] leading-relaxed text-foreground outline-none placeholder:text-placeholder"
-						placeholder="Plan, @ for context, / for commands"
-						value={inputValue}
-						onChange={handleTextareaInput}
-						onKeyDown={handleKeyDown}
-						rows={3}
-					/>
-					<div className="flex items-center justify-between gap-1.5 pt-0.5">
-						<div className="flex min-w-0 flex-1 items-center gap-1">
-							{/* Mode picker */}
-							<div className="relative" ref={modePickerRef}>
-								<button
-									ref={modeButtonRef}
-									className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
-									onClick={() => {
-										if (!showModePicker && modeButtonRef.current) {
-											const rect =
-												modeButtonRef.current.getBoundingClientRect();
-											setModePickerPos({
-												top: rect.bottom + 4,
-												left: rect.left,
-											});
-										}
-										setShowModePicker(!showModePicker);
-									}}
-								>
-									<span className="text-[10px] tracking-[-2px]">
-										&#8734;&#8734;
-									</span>
-									<span className="max-w-[120px] overflow-hidden text-ellipsis">
-										{chatMode}
-									</span>
-									<ChevronDown className="h-3 w-3" />
-								</button>
-								{showModePicker && modePickerPos && (
-									<div
-										className="fixed z-[1000] min-w-[150px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-										style={{ top: modePickerPos.top, left: modePickerPos.left }}
-									>
-										{(["Agent", "Ask", "Edit"] as const).map((mode) => (
-											<button
-												key={mode}
-												className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${mode === chatMode ? "bg-highlight text-sky" : ""}`}
-												onClick={() => {
-													chatService.setMode(mode);
-													setChatMode(mode);
-													setShowModePicker(false);
-												}}
-											>
-												{mode}
-											</button>
-										))}
-									</div>
-								)}
-							</div>
+      {/* Input area at top */}
+      <div className="flex shrink-0 flex-col gap-1 px-3 py-2">
+        <div className="relative box-border w-full cursor-text rounded-[10px] border border-border-500 bg-panel-600 px-1.5 pb-1.5 focus-within:border-sky">
+          <textarea
+            ref={textareaRef}
+            className="w-full min-h-[60px] max-h-[200px] resize-none border-none bg-transparent px-1.5 pt-2.5 pb-1 text-[13px] font-[inherit] leading-relaxed text-foreground outline-none placeholder:text-placeholder"
+            placeholder="Plan, @ for context, / for commands"
+            value={inputValue}
+            onChange={handleTextareaInput}
+            onKeyDown={handleKeyDown}
+            rows={3}
+          />
+          <div className="flex items-center justify-between gap-1.5 pt-0.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              {/* Mode picker */}
+              <div className="relative" ref={modePickerRef}>
+                <button
+                  ref={modeButtonRef}
+                  className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
+                  onClick={() => {
+                    if (!showModePicker && modeButtonRef.current) {
+                      const rect =
+                        modeButtonRef.current.getBoundingClientRect();
+                      setModePickerPos({
+                        top: rect.bottom + 4,
+                        left: rect.left,
+                      });
+                    }
+                    setShowModePicker(!showModePicker);
+                  }}
+                >
+                  <span className="text-[10px] tracking-[-2px]">
+                    &#8734;&#8734;
+                  </span>
+                  <span className="max-w-[120px] overflow-hidden text-ellipsis">
+                    {chatMode}
+                  </span>
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                {showModePicker && modePickerPos && (
+                  <div
+                    className="fixed z-[1000] min-w-[150px] rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+                    style={{ top: modePickerPos.top, left: modePickerPos.left }}
+                  >
+                    {(["Agent", "Ask", "Edit"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${mode === chatMode ? "bg-highlight text-sky" : ""}`}
+                        onClick={() => {
+                          chatService.setMode(mode);
+                          setChatMode(mode);
+                          setShowModePicker(false);
+                        }}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-							{/* Model picker */}
-							<div className="relative" ref={modelPickerRef}>
-								<button
-									ref={modelButtonRef}
-									className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
-									onClick={() => {
-										if (!showModelPicker && modelButtonRef.current) {
-											const rect =
-												modelButtonRef.current.getBoundingClientRect();
-											setModelPickerPos({
-												top: rect.bottom + 4,
-												left: rect.left,
-											});
-										}
-										setShowModelPicker(!showModelPicker);
-									}}
-								>
-									{isLoadingModel && (
-										<Loader2 className="h-3 w-3 animate-spin" />
-									)}
-									<span className="max-w-[120px] overflow-hidden text-ellipsis">
-										{selectedModel?.displayName ?? "No model"}
-									</span>
-									<ChevronDown className="h-3 w-3" />
-								</button>
-								{showModelPicker && modelPickerPos && (
-									<div
-										className="fixed z-[1000] max-h-[300px] min-w-[220px] overflow-y-auto rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-										style={{
-											top: modelPickerPos.top,
-											left: modelPickerPos.left,
-										}}
-									>
-										{installedModels.length > 0 ? (
-											installedModels.map((model) => (
-												<button
-													key={model.id}
-													className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
-													onClick={() => handleSelectModel(model)}
-												>
-													<span>{model.displayName}</span>
-												</button>
-											))
-										) : (
-											<div className="p-2 text-center text-xs text-placeholder">
-												No models installed
-											</div>
-										)}
-										<div className="my-1 h-px bg-border-500" />
-										<button
-											className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
-											onClick={handleFetchCatalog}
-										>
-											<Download className="mr-2 h-3.5 w-3.5" />
-											Add Local Model...
-										</button>
-									</div>
-								)}
-							</div>
-						</div>
+              {/* Model picker */}
+              <div className="relative" ref={modelPickerRef}>
+                <button
+                  ref={modelButtonRef}
+                  className="flex h-[22px] cursor-pointer items-center gap-1 whitespace-nowrap rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:bg-border-500 hover:text-foreground"
+                  onClick={() => {
+                    if (!showModelPicker && modelButtonRef.current) {
+                      const rect =
+                        modelButtonRef.current.getBoundingClientRect();
+                      setModelPickerPos({
+                        top: rect.bottom + 4,
+                        left: rect.left,
+                      });
+                    }
+                    setShowModelPicker(!showModelPicker);
+                  }}
+                >
+                  {isLoadingModel && (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  )}
+                  <span className="max-w-[120px] overflow-hidden text-ellipsis">
+                    {selectedModel?.displayName ?? "No model"}
+                  </span>
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                {showModelPicker && modelPickerPos && (
+                  <div
+                    className="fixed z-[1000] max-h-[300px] min-w-[220px] overflow-y-auto rounded-md border border-border-500 bg-panel-600 p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+                    style={{
+                      top: modelPickerPos.top,
+                      left: modelPickerPos.left,
+                    }}
+                  >
+                    {installedModels.length > 0 ? (
+                      installedModels.map((model) => (
+                        <button
+                          key={model.id}
+                          className={`flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500 ${model.id === selectedModel?.id ? "bg-highlight text-sky" : ""}`}
+                          onClick={() => handleSelectModel(model)}
+                        >
+                          <span>{model.displayName}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-2 text-center text-xs text-placeholder">
+                        No models installed
+                      </div>
+                    )}
+                    <div className="my-1 h-px bg-border-500" />
+                    <button
+                      className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
+                      onClick={handleFetchCatalog}
+                    >
+                      <Download className="mr-2 h-3.5 w-3.5" />
+                      Add Local Model...
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
 
-						<div className="flex shrink-0 items-center gap-1">
-							<button className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
-								<ImageIcon className="h-4 w-4" />
-							</button>
-							<button
-								className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
-								onClick={isStreaming ? handleStopGeneration : undefined}
-								aria-label={isStreaming ? "Stop generation" : "Voice input"}
-								title={isStreaming ? "Stop generation" : "Voice input"}
-							>
-								{isStreaming ? (
-									<Square className="h-4 w-4 fill-current" />
-								) : (
-									<Mic className="h-4 w-4" />
-								)}
-							</button>
-						</div>
-					</div>
-				</div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
+                <ImageIcon className="h-4 w-4" />
+              </button>
+              <button
+                className="flex size-7 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+                onClick={isStreaming ? handleStopGeneration : undefined}
+                aria-label={isStreaming ? "Stop generation" : "Voice input"}
+                title={isStreaming ? "Stop generation" : "Voice input"}
+              >
+                {isStreaming ? (
+                  <Square className="h-4 w-4 fill-current" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
 
-				{/* Scope selector */}
-				<div className="py-0.5">
-					<button className="flex cursor-pointer items-center gap-1 rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:text-foreground">
-						<span className="text-sm">&#9633;</span>
-						<span>Local</span>
-						<ChevronDown className="h-3 w-3" />
-					</button>
-				</div>
-			</div>
+        {/* Scope selector */}
+        <div className="py-0.5">
+          <button className="flex cursor-pointer items-center gap-1 rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground-900 hover:text-foreground">
+            <span className="text-sm">&#9633;</span>
+            <span>Local</span>
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
 
-			{/* Messages area */}
-			<div className="min-h-0 flex-1 overflow-y-auto text-foreground">
-				{messages.length === 0 ? (
-					<div className="flex h-full flex-col items-center justify-center gap-3">
-						{serverStatus !== "running" && (
-							<div className="flex flex-col items-center gap-2">
-								{serverStatus === "stopped" && (
-									<>
-										<AlertCircle className="h-5 w-5 text-foreground/40" />
-										<span className="text-foreground/40">
-											Local model server not running
-										</span>
-										<button
-											className="cursor-pointer rounded-md border border-border-500 bg-sky px-4 py-1.5 text-xs text-white hover:opacity-90"
-											onClick={async () => {
-												await llamaServerService.startServer();
-												const models = await chatService.getInstalledModels();
-												setInstalledModels(models);
-												if (models.length > 0) {
-													setSelectedModel(models[0]);
-													chatService.currentModel = models[0];
-													setIsLoadingModel(true);
-													try {
-														await llamaServerService.loadModel(models[0].id);
-													} catch (error) {
-														console.error("Failed to load model:", error);
-													} finally {
-														setIsLoadingModel(false);
-													}
-												}
-											}}
-										>
-											Start Server
-										</button>
-									</>
-								)}
-								{serverStatus === "starting" && (
-									<>
-										<Loader2 className="h-5 w-5 animate-spin text-foreground/40" />
-										<span className="text-foreground/40">
-											Starting server...
-										</span>
-									</>
-								)}
-								{serverStatus === "error" && (
-									<>
-										<AlertCircle className="h-5 w-5 text-red-400" />
-										<span className="text-red-400">Server error</span>
-									</>
-								)}
-							</div>
-						)}
-					</div>
-				) : (
-					<div className="mx-auto flex max-w-[950px] flex-col">
-						{messages.map((msg) => {
-							if (
-								msg.subtype === "tool_result" &&
-								toolMessagePairing.pairedResultIds.has(msg.id)
-							) {
-								return null;
-							}
-							if (msg.subtype === "tool_use") {
-								const pairedResult =
-									toolMessagePairing.pairedResultByToolUseId.get(msg.id);
-								if (pairedResult) {
-									return (
-										<ChatMessageItem
-											key={msg.id}
-											message={msg}
-											onOpenFileAtLine={onOpenFileAtLine}
-											pairedResult={pairedResult}
-										/>
-									);
-								}
-							}
-							return (
-								<ChatMessageItem
-									key={msg.id}
-									message={msg}
-									onOpenFileAtLine={onOpenFileAtLine}
-								/>
-							);
-						})}
-						{isStreaming && (
-							<ChatMessageItem
-								message={{
-									id: "streaming-preview",
-									role: "assistant",
-									content: visibleStreamingText ?? "",
-									timestamp: Date.now(),
-									isStreaming: true,
-									subtype: "message",
-								}}
-							/>
-						)}
-						<div ref={messagesEndRef} />
-					</div>
-				)}
-			</div>
+      {/* Messages area */}
+      <div className="min-h-0 flex-1 overflow-y-auto text-foreground">
+        {messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            {serverStatus !== "running" && (
+              <div className="flex flex-col items-center gap-2">
+                {serverStatus === "stopped" && (
+                  <>
+                    <AlertCircle className="h-5 w-5 text-foreground/40" />
+                    <span className="text-foreground/40">
+                      Local model server not running
+                    </span>
+                    <button
+                      className="cursor-pointer rounded-md border border-border-500 bg-sky px-4 py-1.5 text-xs text-white hover:opacity-90"
+                      onClick={async () => {
+                        await llamaServerService.startServer();
+                        const models = await chatService.getInstalledModels();
+                        setInstalledModels(models);
+                        if (models.length > 0) {
+                          setSelectedModel(models[0]);
+                          chatService.currentModel = models[0];
+                          setIsLoadingModel(true);
+                          try {
+                            await llamaServerService.loadModel(models[0].id);
+                          } catch (error) {
+                            console.error("Failed to load model:", error);
+                          } finally {
+                            setIsLoadingModel(false);
+                          }
+                        }
+                      }}
+                    >
+                      Start Server
+                    </button>
+                  </>
+                )}
+                {serverStatus === "starting" && (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin text-foreground/40" />
+                    <span className="text-foreground/40">
+                      Starting server...
+                    </span>
+                  </>
+                )}
+                {serverStatus === "error" && (
+                  <>
+                    <AlertCircle className="h-5 w-5 text-red-400" />
+                    <span className="text-red-400">Server error</span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-[950px] flex-col">
+            {messages.map((msg, idx) => {
+              if (
+                msg.subtype === "tool_result" &&
+                toolMessagePairing.pairedResultIds.has(msg.id)
+              ) {
+                return null;
+              }
 
-			<Modal
-				open={showDownloadPanel}
-				onClose={() => setShowDownloadPanel(false)}
-				title="Choose a model to download"
-				description="The downloader now opens in a centered modal so the chat stays visible. Active downloads continue in a small floating indicator."
-				contentClassName="p-2"
-				footer={
-					<div className="flex justify-end">
-						<button
-							type="button"
-							className="cursor-pointer rounded-md border border-border-500 bg-transparent px-3 py-1.5 text-xs text-foreground hover:bg-border-500"
-							onClick={() => setShowDownloadPanel(false)}
-						>
-							Close
-						</button>
-					</div>
-				}
-			>
-				<div className="space-y-1">
-					{downloadCatalog.map((entry) => {
-						const dlState = downloadProgress.get(entry.id);
-						const isActive =
-							dlState &&
-							dlState.phase !== "complete" &&
-							dlState.phase !== "error" &&
-							dlState.phase !== "cancelled";
+              const isToolMsg =
+                msg.subtype === "tool_use" || msg.subtype === "tool_result";
+              let isLastToolInRun = false;
+              if (isToolMsg) {
+                const nextVisible = messages
+                  .slice(idx + 1)
+                  .find(
+                    (m) =>
+                      !(
+                        m.subtype === "tool_result" &&
+                        toolMessagePairing.pairedResultIds.has(m.id)
+                      ),
+                  );
+                const nextIsAlsoTool =
+                  nextVisible?.subtype === "tool_use" ||
+                  nextVisible?.subtype === "tool_result";
+                isLastToolInRun = !nextIsAlsoTool;
+              }
 
-						return (
-							<div
-								key={entry.id}
-								className="flex items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-3 transition-colors hover:border-border-500 hover:bg-panel-400"
-							>
-								<div className="flex min-w-0 flex-1 flex-col gap-1">
-									<span className="flex items-center gap-1.5 text-[13px] text-foreground">
-										{entry.name}
-										{entry.recommended && (
-											<span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">
-												Recommended
-											</span>
-										)}
-									</span>
-									<span className="text-[11px] text-placeholder">
-										{entry.size} · {entry.description}
-									</span>
-									{dlState && (
-										<span className="truncate text-[11px] text-placeholder">
-											{getDownloadMessage(dlState)}
-										</span>
-									)}
-								</div>
-								{isActive ? (
-									<button
-										type="button"
-										className="shrink-0 cursor-pointer rounded border border-border-500 bg-transparent px-3 py-1 text-xs text-foreground hover:bg-border-500"
-										onClick={() => handleCancelDownload(entry.id)}
-									>
-										Cancel
-									</button>
-								) : (
-									<button
-										type="button"
-										className="shrink-0 cursor-pointer rounded border-none bg-sky px-3 py-1 text-xs text-white hover:opacity-90"
-										onClick={() => handleDownloadModel(entry)}
-									>
-										Download
-									</button>
-								)}
-							</div>
-						);
-					})}
-				</div>
-			</Modal>
+              if (msg.subtype === "tool_use") {
+                const pairedResult =
+                  toolMessagePairing.pairedResultByToolUseId.get(msg.id);
+                if (pairedResult) {
+                  return (
+                    <ChatMessageItem
+                      key={msg.id}
+                      message={msg}
+                      onOpenFileAtLine={onOpenFileAtLine}
+                      pairedResult={pairedResult}
+                      isLastTool={isLastToolInRun && !isStreaming}
+                    />
+                  );
+                }
+              }
+              return (
+                <ChatMessageItem
+                  key={msg.id}
+                  message={msg}
+                  onOpenFileAtLine={onOpenFileAtLine}
+                  isLastTool={isLastToolInRun && !isStreaming}
+                />
+              );
+            })}
+            {isStreaming && (
+              <ChatMessageItem
+                message={{
+                  id: "streaming-preview",
+                  role: "assistant",
+                  content: visibleStreamingText ?? "",
+                  timestamp: Date.now(),
+                  isStreaming: true,
+                  subtype: "message",
+                }}
+              />
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
 
-			{activeDownloads.length > 0 && (
-				<div className="pointer-events-none fixed inset-x-0 bottom-6 z-[1200] flex justify-center px-4">
-					<div className="pointer-events-auto flex w-full max-w-[420px] flex-col gap-2">
-						{activeDownloads.map((event) => (
-							<DownloadIndicator
-								key={event.modelId}
-								title={getDownloadEntryName(event.modelId)}
-								message={getDownloadMessage(event)}
-								tone={
-									event.phase === "error"
-										? "error"
-										: event.phase === "complete"
-											? "complete"
-											: event.phase === "cancelled"
-												? "cancelled"
-												: "active"
-								}
-								onCancel={
-									event.canCancel
-										? () => handleCancelDownload(event.modelId)
-										: undefined
-								}
-							/>
-						))}
-					</div>
-				</div>
-			)}
+      <Modal
+        open={showDownloadPanel}
+        onClose={() => setShowDownloadPanel(false)}
+        title="Choose a model to download"
+        description="The downloader now opens in a centered modal so the chat stays visible. Active downloads continue in a small floating indicator."
+        contentClassName="p-2"
+        footer={
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="cursor-pointer rounded-md border border-border-500 bg-transparent px-3 py-1.5 text-xs text-foreground hover:bg-border-500"
+              onClick={() => setShowDownloadPanel(false)}
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-1">
+          {downloadCatalog.map((entry) => {
+            const dlState = downloadProgress.get(entry.id);
+            const isActive =
+              dlState &&
+              dlState.phase !== "complete" &&
+              dlState.phase !== "error" &&
+              dlState.phase !== "cancelled";
 
-			{/* Footer usage indicator */}
-			<div className="shrink-0 border-t border-border-500 px-4 py-2">
-				<div className="flex items-center gap-1.5 text-xs text-placeholder">
-					<span className="text-sm text-sky-700">&#9673;</span>
-					<span>Local model</span>
-				</div>
-			</div>
-		</div>
-	);
+            return (
+              <div
+                key={entry.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-3 transition-colors hover:border-border-500 hover:bg-panel-400"
+              >
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="flex items-center gap-1.5 text-[13px] text-foreground">
+                    {entry.name}
+                    {entry.recommended && (
+                      <span className="rounded bg-highlight px-1.5 py-px text-[10px] text-sky">
+                        Recommended
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[11px] text-placeholder">
+                    {entry.size} · {entry.description}
+                  </span>
+                  {dlState && (
+                    <span className="truncate text-[11px] text-placeholder">
+                      {getDownloadMessage(dlState)}
+                    </span>
+                  )}
+                </div>
+                {isActive ? (
+                  <button
+                    type="button"
+                    className="shrink-0 cursor-pointer rounded border border-border-500 bg-transparent px-3 py-1 text-xs text-foreground hover:bg-border-500"
+                    onClick={() => handleCancelDownload(entry.id)}
+                  >
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="shrink-0 cursor-pointer rounded border-none bg-sky px-3 py-1 text-xs text-white hover:opacity-90"
+                    onClick={() => handleDownloadModel(entry)}
+                  >
+                    Download
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Modal>
+
+      {activeDownloads.length > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[1200] flex justify-center px-4">
+          <div className="pointer-events-auto flex w-full max-w-[420px] flex-col gap-2">
+            {activeDownloads.map((event) => (
+              <DownloadIndicator
+                key={event.modelId}
+                title={getDownloadEntryName(event.modelId)}
+                message={getDownloadMessage(event)}
+                tone={
+                  event.phase === "error"
+                    ? "error"
+                    : event.phase === "complete"
+                      ? "complete"
+                      : event.phase === "cancelled"
+                        ? "cancelled"
+                        : "active"
+                }
+                onCancel={
+                  event.canCancel
+                    ? () => handleCancelDownload(event.modelId)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Footer usage indicator */}
+      <div className="shrink-0 border-t border-border-500 px-4 py-2">
+        <div className="flex items-center gap-1.5 text-xs text-placeholder">
+          <span className="text-sm text-sky-700">&#9673;</span>
+          <span>Local model</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const thinkingExpansionState = new Map<string, boolean>();
 
 function MessageCursor() {
-	return (
-		<span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">
-			|
-		</span>
-	);
+  return (
+    <span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">
+      |
+    </span>
+  );
 }
 
 function PlainMessageText({
-	content,
-	className,
+  content,
+  className,
 }: {
-	content: string;
-	className: string;
+  content: string;
+  className: string;
 }) {
-	return (
-		<div className={className}>
-			{content.split("\n").map((line, i) => (
-				<React.Fragment key={i}>
-					{i > 0 && <br />}
-					{line}
-				</React.Fragment>
-			))}
-		</div>
-	);
+  return (
+    <div className={className}>
+      {content.split("\n").map((line, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <br />}
+          {line}
+        </React.Fragment>
+      ))}
+    </div>
+  );
 }
 
 function ThinkingBlock({
-	messageId,
-	index,
-	content,
-	isClosed,
-	isStreaming,
+  messageId,
+  index,
+  content,
+  isClosed,
+  isStreaming,
 }: {
-	messageId: string;
-	index: number;
-	content: string;
-	isClosed: boolean;
-	isStreaming: boolean;
+  messageId: string;
+  index: number;
+  content: string;
+  isClosed: boolean;
+  isStreaming: boolean;
 }) {
-	const storageKey = `${messageId}:thinking:${index}`;
-	const preview = content.replace(/\s+/g, " ").trim();
-	const persistedExpanded = thinkingExpansionState.get(storageKey);
-	const [expanded, setExpanded] = React.useState(
-		persistedExpanded ?? (isStreaming || !isClosed),
-	);
+  const isActivelyStreaming = isStreaming && !isClosed;
+  const scrollRef = React.useRef<HTMLDivElement>(null);
 
-	React.useEffect(() => {
-		thinkingExpansionState.set(storageKey, expanded);
-	}, [expanded, storageKey]);
+  React.useEffect(() => {
+    if (isActivelyStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  });
 
-	const toggleExpanded = React.useCallback(() => {
-		setExpanded((current) => !current);
-	}, []);
+  const storageKey = `${messageId}:thinking:${index}`;
+  const persistedExpanded = thinkingExpansionState.get(storageKey);
+  const [expanded, setExpanded] = React.useState(
+    persistedExpanded ?? (isStreaming || !isClosed),
+  );
 
-	return (
-		<div className="my-2 overflow-hidden rounded-xl border border-border-500 bg-panel-300/80">
-			<button
-				type="button"
-				onClick={toggleExpanded}
-				className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-panel-400/80"
-				aria-expanded={expanded}
-			>
-				<ChevronDown
-					className={`h-3.5 w-3.5 shrink-0 text-placeholder transition-transform ${expanded ? "rotate-180" : ""}`}
-				/>
-				<div className="min-w-0 flex-1">
-					<div className="text-[11px] font-medium uppercase tracking-[0.18em] text-foreground/55">
-						{isStreaming && !isClosed ? "Thinking" : "Thought Process"}
-					</div>
-					{!expanded && preview && (
-						<div className="truncate pt-0.5 text-[12px] text-foreground/55">
-							{preview}
-						</div>
-					)}
-				</div>
-				{isStreaming && !isClosed && (
-					<span className="size-2 shrink-0 rounded-full bg-sky animate-pulse" />
-				)}
-			</button>
-			{expanded && (
-				<div className="border-t border-border-500 px-3 py-2 text-[12px] leading-relaxed text-foreground/65 whitespace-pre-wrap">
-					{content}
-					{isStreaming && !isClosed && <MessageCursor />}
-				</div>
-			)}
-		</div>
-	);
+  React.useEffect(() => {
+    thinkingExpansionState.set(storageKey, expanded);
+  }, [expanded, storageKey]);
+
+  return (
+    <ThinkingTimelineRow isStreaming={isActivelyStreaming}>
+      {expanded && content && (
+        <div className="relative overflow-hidden rounded-lg border border-border-500/60 bg-panel-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)]">
+          {isActivelyStreaming && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] h-6 bg-gradient-to-b from-panel-700 to-transparent" />
+          )}
+          <div
+            ref={scrollRef}
+            className="overflow-auto px-3 py-2"
+            style={{ maxHeight: 160 }}
+          >
+            <div className="text-[12px] leading-relaxed text-foreground/55 whitespace-pre-wrap">
+              {content}
+              {isActivelyStreaming && <MessageCursor />}
+            </div>
+          </div>
+          {!isActivelyStreaming && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-panel-700 to-transparent" />
+          )}
+          <button
+            type="button"
+            className="absolute right-1.5 top-1.5 z-[3] flex size-5 items-center justify-center rounded bg-panel-500/80 text-foreground/40 transition-colors hover:bg-panel-400 hover:text-foreground/70"
+            onClick={() => {
+              const next = !expanded;
+              setExpanded(next);
+              thinkingExpansionState.set(storageKey, next);
+            }}
+            aria-label="Collapse thinking"
+          >
+            <ChevronDown className="size-3 rotate-180" />
+          </button>
+        </div>
+      )}
+      {!expanded && content && (
+        <button
+          type="button"
+          className="text-left text-[11px] text-foreground/40 truncate max-w-[400px] hover:text-foreground/60 transition-colors"
+          onClick={() => {
+            setExpanded(true);
+            thinkingExpansionState.set(storageKey, true);
+          }}
+        >
+          {content.replace(/\s+/g, " ").trim().slice(0, 120)}…
+        </button>
+      )}
+    </ThinkingTimelineRow>
+  );
 }
 
 function AssistantMessageContent({
-	message,
-	isNotice,
+  message,
+  isNotice,
 }: {
-	message: ChatMessage;
-	isNotice: boolean;
+  message: ChatMessage;
+  isNotice: boolean;
 }) {
-	const parsed = React.useMemo(
-		() => parseAssistantRenderableContent(message.content),
-		[message.content],
-	);
-	const textClassName = `whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`;
+  const parsed = React.useMemo(
+    () => parseAssistantRenderableContent(message.content),
+    [message.content],
+  );
+  const textClassName = `whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`;
 
-	if (!parsed.hasThinking) {
-		return (
-			<div>
-				<PlainMessageText
-					content={message.content}
-					className={textClassName}
-				/>
-				{message.isStreaming && <MessageCursor />}
-			</div>
-		);
-	}
+  if (!parsed.hasThinking) {
+    return (
+      <div>
+        <PlainMessageText content={message.content} className={textClassName} />
+        {message.isStreaming && <MessageCursor />}
+      </div>
+    );
+  }
 
-	return (
-		<div>
-			{parsed.segments.map((segment, index) =>
-				segment.kind === "text" ? (
-					segment.content ? (
-						<PlainMessageText
-							key={`${message.id}:text:${index}`}
-							content={segment.content}
-							className={textClassName}
-						/>
-					) : null
-				) : (
-					<ThinkingBlock
-						key={`${message.id}:thinking:${index}`}
-						messageId={message.id}
-						index={index}
-						content={segment.content}
-						isClosed={segment.isClosed}
-						isStreaming={Boolean(message.isStreaming)}
-					/>
-				),
-			)}
-			{message.isStreaming &&
-				!parsed.segments.some(
-					(segment) => segment.kind === "thinking" && !segment.isClosed,
-				) && <MessageCursor />}
-		</div>
-	);
+  return (
+    <div>
+      {parsed.segments.map((segment, index) =>
+        segment.kind === "text" ? (
+          segment.content ? (
+            <PlainMessageText
+              key={`${message.id}:text:${index}`}
+              content={segment.content}
+              className={textClassName}
+            />
+          ) : null
+        ) : (
+          <ThinkingBlock
+            key={`${message.id}:thinking:${index}`}
+            messageId={message.id}
+            index={index}
+            content={segment.content}
+            isClosed={segment.isClosed}
+            isStreaming={Boolean(message.isStreaming)}
+          />
+        ),
+      )}
+      {message.isStreaming &&
+        !parsed.segments.some(
+          (segment) => segment.kind === "thinking" && !segment.isClosed,
+        ) && <MessageCursor />}
+    </div>
+  );
 }
 
 function ChatMessageItem({
-	message,
-	onOpenFileAtLine,
-	pairedResult,
+  message,
+  onOpenFileAtLine,
+  pairedResult,
+  isLastTool = false,
 }: {
-	message: ChatMessage;
-	pairedResult?: ChatMessage;
-	onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  message: ChatMessage;
+  pairedResult?: ChatMessage;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  isLastTool?: boolean;
 }) {
-	const isUser = message.role === "user";
-	const isNotice =
-		message.role === "system" ||
-		message.subtype === "error" ||
-		message.subtype === "interruption";
-	const isToolMessage =
-		message.subtype === "tool_use" || message.subtype === "tool_result";
+  const isUser = message.role === "user";
+  const isNotice =
+    message.role === "system" ||
+    message.subtype === "error" ||
+    message.subtype === "interruption";
+  const isToolMessage =
+    message.subtype === "tool_use" || message.subtype === "tool_result";
 
-	return (
-		<div
-			className={`flex cursor-default select-text flex-col px-4 py-1.5 ${isUser ? "items-end" : ""}`}
-		>
-			{!isUser && !isToolMessage && (
-				<div className="mb-1 flex items-center gap-2">
-					<div className="flex size-6 items-center justify-center rounded-full bg-border-500">
-						<span className="text-sm text-sky">&#10022;</span>
-					</div>
-				</div>
-			)}
-			<div
-				className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "" : ""}`}
-			>
-				{isToolMessage ? (
-					<ToolMessageRenderer
-						message={message}
-						onOpenFileAtLine={onOpenFileAtLine}
-						pairedResult={pairedResult}
-					/>
-				) : message.isStreaming && !message.content ? (
-					<div className="py-1 text-[13px] leading-relaxed">
-						<span className="tool-title-shimmer font-medium">Working...</span>
-					</div>
-				) : (
-					<AssistantMessageContent message={message} isNotice={isNotice} />
-				)}
-			</div>
-		</div>
-	);
+  return (
+    <div
+      className={`flex cursor-default select-text flex-col px-4 ${isUser ? "items-end py-1.5" : isToolMessage ? "py-0" : "py-1.5"}`}
+    >
+      {!isUser && !isToolMessage && (
+        <div className="mb-1 flex items-center gap-2">
+          <div className="flex size-6 items-center justify-center rounded-full bg-border-500">
+            <span className="text-sm text-sky">&#10022;</span>
+          </div>
+        </div>
+      )}
+      <div
+        className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "pl-0.5" : ""}`}
+      >
+        {isToolMessage ? (
+          <ToolMessageRenderer
+            message={message}
+            onOpenFileAtLine={onOpenFileAtLine}
+            pairedResult={pairedResult}
+            isLast={isLastTool}
+          />
+        ) : message.isStreaming && !message.content ? (
+          <WorkingTimelineRow text="Working..." isLast />
+        ) : (
+          <AssistantMessageContent message={message} isNotice={isNotice} />
+        )}
+      </div>
+    </div>
+  );
 }

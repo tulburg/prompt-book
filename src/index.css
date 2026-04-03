@@ -211,6 +211,22 @@
   }
 }
 
+@keyframes thinking-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px 1px oklch(67.616% 0.15459 241.89 / 0.3);
+    background-color: oklch(67.616% 0.15459 241.89 / 0.7);
+  }
+  50% {
+    box-shadow: 0 0 8px 3px oklch(67.616% 0.15459 241.89 / 0.55);
+    background-color: oklch(67.616% 0.15459 241.89 / 1);
+  }
+}
+
+.thinking-glow-dot {
+  animation: thinking-glow 1.8s ease-in-out infinite;
+}
+
 @keyframes chat-blink {
   0%,
   100% {
