@@ -5,7 +5,7 @@ import { ensureMonacoSetup } from "@/lib/monaco/monaco-setup";
 import { getModel, syncModel, updateModelContent } from "@/lib/monaco/model-store";
 import { cn } from "@/lib/utils";
 
-import type { ActiveFileState } from "@/lib/project-files";
+import type { ActiveFileState, EditorNavigationTarget } from "@/lib/project-files";
 import type * as Monaco from "monaco-editor";
 
 function getCanvasLineNumbersMinChars() {
@@ -14,6 +14,7 @@ function getCanvasLineNumbersMinChars() {
 
 interface MonacoEditorProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
 	activeFile: ActiveFileState;
+	navigationTarget?: EditorNavigationTarget | null;
 	onChange: (content: string) => void;
 	onSave: () => void | Promise<void>;
 }
@@ -69,6 +70,7 @@ function buildEditorContextMenuItems(
 export function MonacoEditor({
 	activeFile,
 	className,
+	navigationTarget,
 	onChange,
 	onSave,
 	...props
@@ -85,6 +87,7 @@ export function MonacoEditor({
 	const viewStatesRef = React.useRef(
 		new Map<string, Monaco.editor.ICodeEditorViewState | null>(),
 	);
+	const lastAppliedNavigationKeyRef = React.useRef<string | null>(null);
 
 	onChangeRef.current = onChange;
 	onSaveRef.current = onSave;
@@ -266,6 +269,25 @@ export function MonacoEditor({
 		editor.focus();
 		isApplyingExternalState.current = false;
 	}, [activeFile.content, activeFile.path, activeFile.permissions.write, editorReady]);
+
+	React.useEffect(() => {
+		const editor = editorRef.current;
+		const target = navigationTarget;
+		if (!editor || !target || target.path !== activeFile.path) {
+			return;
+		}
+
+		const navigationKey = `${target.nonce}:${target.path}:${target.line}`;
+		if (lastAppliedNavigationKeyRef.current === navigationKey) {
+			return;
+		}
+
+		lastAppliedNavigationKeyRef.current = navigationKey;
+		const position = { column: 1, lineNumber: target.line };
+		editor.setPosition(position);
+		editor.revealPositionInCenter(position);
+		editor.focus();
+	}, [activeFile.path, navigationTarget]);
 
 	return (
 		<div

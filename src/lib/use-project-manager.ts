@@ -8,6 +8,7 @@ import {
 } from "@/lib/monaco/model-store";
 import type {
 	ActiveFileState,
+	EditorNavigationTarget,
 	ProjectBridge,
 	ProjectNode,
 	ProjectNodeKind,
@@ -378,10 +379,13 @@ export function useProjectManager() {
 	const [activeFilePath, setActiveFilePath] = React.useState<string | null>(
 		null,
 	);
+	const [editorNavigationTarget, setEditorNavigationTarget] =
+		React.useState<EditorNavigationTarget | null>(null);
 	const [pendingCreate, setPendingCreate] =
 		React.useState<PendingCreateState | null>(null);
 	const [renamingPath, setRenamingPath] = React.useState<string | null>(null);
 	const [isBusy, setIsBusy] = React.useState(false);
+	const navigationNonceRef = React.useRef(0);
 	const fileStatesRef = React.useRef(fileStates);
 	const openFilePathsRef = React.useRef(openFilePaths);
 	const previewFilePathRef = React.useRef(previewFilePath);
@@ -766,6 +770,64 @@ export function useProjectManager() {
 			setError(null);
 		},
 		[setError],
+	);
+
+	const openFileAtLine = React.useCallback(
+		async (path: string, line: number) => {
+			if (!projectBridge || !project) {
+				setError(
+					FALLBACK_PERMISSIONS.message ?? "Project access is unavailable.",
+				);
+				return false;
+			}
+
+			const normalizedLine = Math.max(1, Math.floor(line) || 1);
+			const root = findRootForPath(project, path);
+			if (!root) {
+				setError("The selected file is outside the current project.");
+				return false;
+			}
+
+			setError(null);
+			setExpandedPaths((current) => {
+				const nextExpanded = new Set(current);
+				for (const ancestor of getAncestorPaths(path, root.path)) {
+					nextExpanded.add(ancestor);
+				}
+				return nextExpanded;
+			});
+			setSelectedPath(path);
+			setActiveFilePath(path);
+			setOpenFilePaths((current) =>
+				current.includes(path) ? current : [...current, path],
+			);
+			setPreviewFilePath((current) => (current === path ? null : current));
+
+			const existingNode = findNode(project.roots, path);
+			const loaded = await ensureFileLoaded(
+				existingNode ?? {
+					path,
+					name: path.split("/").pop() || path,
+					kind: "file",
+					parentPath: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
+					rootPath: root.path,
+					permissions:
+						fileStatesRef.current[path]?.permissions ?? FALLBACK_PERMISSIONS,
+				},
+			);
+			if (!loaded) {
+				return false;
+			}
+
+			navigationNonceRef.current += 1;
+			setEditorNavigationTarget({
+				path,
+				line: normalizedLine,
+				nonce: navigationNonceRef.current,
+			});
+			return true;
+		},
+		[ensureFileLoaded, project, projectBridge, setError],
 	);
 
 	const pinFile = React.useCallback(
@@ -1224,12 +1286,14 @@ export function useProjectManager() {
 		copyNode,
 		createNode,
 		deleteNode,
+		editorNavigationTarget,
 		error,
 		expandedPaths,
 		isBootstrapping,
 		isBusy,
 		moveNode,
 		openFiles,
+		openFileAtLine,
 		openNode,
 		pinFile,
 		previewFilePath,

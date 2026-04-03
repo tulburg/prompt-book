@@ -48,6 +48,12 @@ export interface ActiveFileState {
 	isLoading: boolean;
 }
 
+export interface EditorNavigationTarget {
+	path: string;
+	line: number;
+	nonce: number;
+}
+
 export interface DirectoryListingResult {
 	path: string;
 	children: ProjectNode[];

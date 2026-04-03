@@ -7,6 +7,7 @@ import {
   type ApplicationSettings,
 } from "@/lib/application-settings";
 import type {
+	EditorNavigationTarget,
   ActiveFileState,
   ProjectNode,
   ProjectSnapshot,
@@ -35,6 +36,7 @@ interface PromptEditorProps
   activeSettings: ApplicationSettings | null;
   settingsDescriptors: ApplicationSettingDescriptor[];
   settingsJson: string;
+	editorNavigationTarget: EditorNavigationTarget | null;
   isBusy: boolean;
   onChange: (content: string) => void;
   onActivateFile: (path: string) => void;
@@ -53,6 +55,7 @@ export function PromptEditor({
   activeFilePath,
   activeSettings,
   className,
+	editorNavigationTarget,
   isBusy,
   onChange,
   onActivateFile,
@@ -204,6 +207,7 @@ export function PromptEditor({
             ) : (
               <MonacoEditor
                 activeFile={activeFile}
+                navigationTarget={editorNavigationTarget}
                 onChange={onChange}
                 onSave={onSave}
                 className="z-[1]"

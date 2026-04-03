@@ -44,3 +44,18 @@ Do not create CSS files, add custom CSS classes, or use inline `style` attribute
 ```
 
 The only permitted exceptions in `src/index.css` are: `@theme` tokens, `@layer base` resets, `@keyframes` for animations, and `@utility` definitions for vendor-prefixed properties with no Tailwind equivalent (e.g. `-webkit-app-region`). Inline `style` is only allowed for truly dynamic runtime values (e.g. computed positions, progress bar widths) — never for static visual properties like colors, spacing, or typography.
+
+### All tests must live in `__tests__/` folders
+Place every test file inside a `__tests__/` directory, mirroring the source tree from there instead of colocating `*.test.*` files beside implementation files.
+
+**Wrong** — colocated test file beside source:
+```ts
+// src/lib/chat/request-builder.test.ts
+```
+
+**Right** — test file inside a mirrored `__tests__` path:
+```ts
+// src/__tests__/lib/chat/request-builder.test.ts
+```
+
+Use the nearest shared `__tests__/` directory for that source tree, such as `src/__tests__/...` for app code and `electron/__tests__/...` for Electron code.

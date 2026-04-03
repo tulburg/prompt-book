@@ -55,23 +55,31 @@ function StatusDot({
 }
 
 function ChevronIcon({
-  expanded,
+  state,
   className,
 }: {
-  expanded: boolean;
+  state: "collapsed" | "peek" | "expanded";
   className?: string;
 }) {
+  const rotationClass =
+    state === "collapsed"
+      ? "-rotate-90"
+      : state === "expanded"
+        ? "rotate-180"
+        : "";
+
   return (
     <svg
-      className={`size-3 text-placeholder transition-transform ${expanded ? "rotate-90" : ""} ${className}`}
+      className={`size-3 text-placeholder transition-transform ${rotationClass} ${className}`}
       viewBox="0 0 16 16"
-      fill="currentColor"
+      fill="none"
     >
       <path
-        d="M6 4l4 4-4 4"
+        d="M4 6l4 4 4-4"
         stroke="currentColor"
         strokeWidth="1.5"
-        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -182,6 +190,27 @@ function getIOCardFilePath(
   return undefined;
 }
 
+function getFileNameFromToolInput(input: JsonObject): string | null {
+  const pathValue =
+    (typeof input.file_path === "string" && input.file_path) ||
+    (typeof input.notebook_path === "string" && input.notebook_path) ||
+    undefined;
+  return extractFileNameFromPathLike(pathValue);
+}
+
+function getFilePathFromToolInput(input: JsonObject): string | undefined {
+  return (
+    (typeof input.file_path === "string" && input.file_path) ||
+    (typeof input.notebook_path === "string" && input.notebook_path) ||
+    undefined
+  );
+}
+
+function getReadNavigationLineFromToolInput(input: JsonObject): number {
+  const offsetValue = input.offset;
+  return typeof offsetValue === "number" && offsetValue > 0 ? offsetValue : 1;
+}
+
 /* ── Card wrapper (Codally-style bordered tool card) ── */
 
 function ToolCard({
@@ -219,17 +248,59 @@ function ToolCardHeader({
   );
 }
 
+function ToolTitle({
+  children,
+  shimmer = false,
+  className,
+}: {
+  children: React.ReactNode;
+  shimmer?: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      className={`text-[12px] font-medium ${shimmer ? "tool-title-shimmer" : "text-foreground"} ${className ?? ""}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+type ToolCardViewState = "collapsed" | "peek" | "expanded";
+
+const toolCardViewStateByKey = new Map<string, ToolCardViewState>();
+
+function useToolCardViewState(
+  stateKey: string | undefined,
+  initialState: ToolCardViewState,
+) {
+  const persistedState = stateKey
+    ? toolCardViewStateByKey.get(stateKey)
+    : undefined;
+  const [viewState, setViewState] = React.useState<ToolCardViewState>(
+    persistedState ?? initialState,
+  );
+
+  React.useEffect(() => {
+    if (!stateKey) return;
+    toolCardViewStateByKey.set(stateKey, viewState);
+  }, [stateKey, viewState]);
+
+  return [viewState, setViewState] as const;
+}
+
 /* ── Terminal / Bash card ── */
 
 function TerminalCard({
   input,
   display,
+  stateKey,
 }: {
   toolName: string;
   input: JsonObject;
   display: Extract<ChatToolDisplay, { kind: "command" }> | undefined;
+  stateKey?: string;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
   const command = display?.command || (input.command as string) || "";
   const description = (input.description as string) || "";
   const isRunning = display?.status === "running";
@@ -237,6 +308,12 @@ function TerminalCard({
   const isComplete = !isRunning && exitCode != null;
   const hasError = exitCode != null && exitCode !== 0;
   const hasOutput = Boolean(display?.stdout || display?.stderr);
+  const hasPreview = Boolean(command || hasOutput || isComplete);
+  const [viewState, setViewState] = useToolCardViewState(
+    stateKey,
+    "collapsed",
+  );
+  const isExpanded = viewState === "expanded";
 
   const headerLabel = isComplete
     ? description
@@ -246,11 +323,18 @@ function TerminalCard({
       ? `Running \`${description}\``
       : "Running command";
 
+  const toggleView = React.useCallback(() => {
+    if (!hasPreview) return;
+    setViewState((current) =>
+      current === "expanded" ? "collapsed" : "expanded",
+    );
+  }, [hasPreview, setViewState]);
+
   return (
     <ToolCard>
-      <ToolCardHeader onClick={() => setExpanded(!expanded)} clickable>
+      <ToolCardHeader onClick={toggleView} clickable={hasPreview}>
         <SquareTerminal className="size-3 text-foreground/50" />
-        <span className="min-w-0 text-[12px] text-foreground truncate">
+        <ToolTitle className="min-w-0 truncate" shimmer={isRunning}>
           {headerLabel.split(/`([^`]+)`/).map((part, i) =>
             i % 2 === 1 ? (
               <span key={i} className="rounded py-0.5 text-[11px]">
@@ -260,7 +344,7 @@ function TerminalCard({
               <span key={i}>{part}</span>
             ),
           )}
-        </span>
+        </ToolTitle>
         {isRunning && (
           <span className="ml-auto size-2 rounded-full bg-sky animate-pulse" />
         )}
@@ -269,10 +353,10 @@ function TerminalCard({
             exit {exitCode}
           </span>
         )}
-        <ChevronIcon expanded={expanded} className="ml-auto" />
+        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
       </ToolCardHeader>
 
-      {expanded && (
+      {viewState !== "collapsed" && (
         <div className="border-t border-border-500 bg-panel-500">
           <div className="px-2.5 py-2 bg-panel-700">
             <div className="font-mono text-[11px] leading-relaxed text-foreground/80">
@@ -284,10 +368,10 @@ function TerminalCard({
           {hasOutput && (
             <TinyScrollArea
               className="border-t border-border-500"
-              style={{ maxHeight: 300 }}
+              style={{ maxHeight: isExpanded ? 300 : 132 }}
             >
               {display?.stdout && (
-                <CodeBlock maxHeight={220} language="shell">
+                <CodeBlock maxHeight={isExpanded ? 220 : 96} language="shell">
                   {display.stdout}
                 </CodeBlock>
               )}
@@ -332,8 +416,24 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
   );
 }
 
-function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
-  const [expanded, setExpanded] = React.useState(false);
+function getDiffNavigationLine(display: ChatToolDisplayDiff) {
+  const firstHunk = display.hunks[0];
+  if (!firstHunk) {
+    return 1;
+  }
+
+  return Math.max(1, firstHunk.newStart || firstHunk.oldStart || 1);
+}
+
+function DiffCard({
+  display,
+  onOpenFileAtLine,
+  stateKey,
+}: {
+  display: ChatToolDisplayDiff;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  stateKey?: string;
+}) {
   const hasHunks = display.hunks.length > 0;
   const hasMonacoDiff =
     display.action === "created"
@@ -341,20 +441,39 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
       : display.originalContent !== undefined &&
         display.modifiedContent !== undefined;
   const fileName = display.filePath.split("/").pop() || display.filePath;
-  const dirPath = shortenPath(
-    display.filePath.split("/").slice(0, -1).join("/"),
+  const hasPreview = hasHunks || Boolean(display.modifiedContent);
+  const [viewState, setViewState] = useToolCardViewState(
+    stateKey,
+    hasPreview ? "peek" : "collapsed",
   );
+  const isExpanded = viewState === "expanded";
 
   return (
     <ToolCard>
       <ToolCardHeader
-        onClick={() => hasHunks && setExpanded(!expanded)}
-        clickable={hasHunks}
+        onClick={() =>
+          hasPreview &&
+          setViewState((current) =>
+            current === "expanded" ? "peek" : "expanded",
+          )
+        }
+        clickable={hasPreview}
       >
         <FileIcon fileName={fileName} />
-        <span className="min-w-0 truncate text-[12px] text-foreground">
+        <button
+          type="button"
+          className="min-w-0 truncate text-[12px] text-foreground hover:underline"
+          onClick={(event) => {
+            event.stopPropagation();
+            void onOpenFileAtLine?.(
+              display.filePath,
+              getDiffNavigationLine(display),
+            );
+          }}
+          title={`Open ${display.filePath}`}
+        >
           {fileName}
-        </span>
+        </button>
         <span className="ml-auto flex gap-1.5 text-[11px] font-medium tabular-nums">
           {display.additions > 0 && (
             <span className="text-green-400">+{display.additions}</span>
@@ -363,9 +482,9 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
             <span className="text-red-400">-{display.deletions}</span>
           )}
         </span>
-        {hasHunks && <ChevronIcon expanded={expanded} />}
+        {hasPreview && <ChevronIcon state={viewState} />}
       </ToolCardHeader>
-      {expanded &&
+      {viewState !== "collapsed" &&
         hasHunks &&
         (hasMonacoDiff ? (
           <div className="border-t border-border-500">
@@ -373,14 +492,14 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
               originalValue={display.originalContent ?? ""}
               modifiedValue={display.modifiedContent ?? ""}
               filePath={display.filePath}
-              maxHeight={400}
+              maxHeight={isExpanded ? 400 : 140}
             />
           </div>
         ) : (
           <TinyScrollArea
             className="border-t border-border-500"
             contentClassName="divide-y divide-border-500"
-            style={{ maxHeight: 400 }}
+            style={{ maxHeight: isExpanded ? 400 : 140 }}
           >
             {display.hunks.map((hunk, i) => (
               <DiffHunkView key={`hunk-${i}`} hunk={hunk} />
@@ -390,11 +509,13 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
       {!hasHunks && display.action === "created" && (
         <div className="border-t border-border-500">
           {display.modifiedContent ? (
-            <MonacoCodeView
-              value={display.modifiedContent}
-              filePath={display.filePath}
-              maxHeight={320}
-            />
+            viewState !== "collapsed" ? (
+              <MonacoCodeView
+                value={display.modifiedContent}
+                filePath={display.filePath}
+                maxHeight={isExpanded ? 320 : 140}
+              />
+            ) : null
           ) : (
             <div className="px-2.5 py-1 text-[11px] text-placeholder">
               New file created
@@ -408,31 +529,132 @@ function DiffCard({ display }: { display: ChatToolDisplayDiff }) {
 
 /* ── IO card (Read, Grep, Write fallback, etc.) ── */
 
-function IOCard({
+function ReadHeader({
+  isRunning = false,
+}: {
+  isRunning?: boolean;
+}) {
+  return (
+    <>
+      <ToolTitle shimmer={isRunning} className="shrink-0">
+        {isRunning ? "Reading..." : "Read"}
+      </ToolTitle>
+    </>
+  );
+}
+
+function ReadFilePill({
+  fileName,
+  filePath,
+  line,
+  onOpenFileAtLine,
+}: {
+  fileName: string | null;
+  filePath?: string;
+  line: number;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+}) {
+  if (!fileName) {
+    return null;
+  }
+
+  const isClickable = Boolean(filePath && onOpenFileAtLine);
+  const className = `inline-flex min-w-0 items-center gap-1 rounded-md border border-border-500 px-2 py-1 text-[11px] text-foreground transition-colors ${
+    isClickable
+      ? "cursor-pointer hover:border-border-400 hover:bg-panel-400"
+      : ""
+  }`;
+  const content = (
+    <>
+      <FileIcon fileName={fileName} />
+      <span className="min-w-0 truncate text-[12px] -ml-1 text-foreground">
+        {fileName}
+      </span>
+    </>
+  );
+
+  if (!isClickable || !filePath) {
+    return <span className={className}>{content}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={() => {
+        void onOpenFileAtLine?.(filePath, line);
+      }}
+      title={`Open ${filePath}`}
+    >
+      {content}
+    </button>
+  );
+}
+
+function ReadInline({
   display,
+  onOpenFileAtLine,
 }: {
   display: Extract<ChatToolDisplay, { kind: "input_output" }>;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
 }) {
-  const [expanded, setExpanded] = React.useState(display.isError === true);
-  // const title = display.title || toolName;
+  const fileName = getIOCardFileName(display);
+  const filePath = getIOCardFilePath(display);
+  return (
+    <div className="flex items-center gap-2 px-1 py-0.5">
+      <div className="flex min-w-0 items-center gap-2 text-[12px]">
+        <ReadHeader />
+        <ReadFilePill
+          fileName={fileName}
+          filePath={filePath}
+          line={1}
+          onOpenFileAtLine={onOpenFileAtLine}
+        />
+      </div>
+      {display.isError && <StatusDot status="error" />}
+    </div>
+  );
+}
+
+function IOCard({
+  display,
+  stateKey,
+}: {
+  display: Extract<ChatToolDisplay, { kind: "input_output" }>;
+  stateKey?: string;
+}) {
   const hasOutput = Boolean(display.output);
   const fileName = getIOCardFileName(display);
   const filePath = getIOCardFilePath(display);
+  const [viewState, setViewState] = useToolCardViewState(
+    stateKey,
+    display.isError ? "expanded" : hasOutput ? "peek" : "collapsed",
+  );
+  const hasPreview = hasOutput;
+  const isExpanded = viewState === "expanded";
 
   return (
     <ToolCard>
-      <ToolCardHeader onClick={() => setExpanded(!expanded)} clickable>
+      <ToolCardHeader
+        onClick={() =>
+          hasPreview &&
+          setViewState((current) =>
+            current === "expanded" ? "peek" : "expanded",
+          )
+        }
+        clickable={hasPreview}
+      >
         {fileName ? <FileIcon fileName={fileName} /> : null}
         <span className="min-w-0 truncate text-[12px] -ml-1 text-foreground">
           {fileName}
         </span>
         {display.isError && <StatusDot status={"error"} />}
-        <ChevronIcon expanded={expanded} className="ml-auto" />
+        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
       </ToolCardHeader>
-      {expanded && (
+      {viewState !== "collapsed" && (
         <div className="border-t border-border-500">
           {hasOutput && (
-            <CodeBlock maxHeight={300} filePath={filePath}>
+            <CodeBlock maxHeight={isExpanded ? 300 : 132} filePath={filePath}>
               {display.output!}
             </CodeBlock>
           )}
@@ -453,25 +675,39 @@ function normalizeFileListItems(items: ChatToolDisplayFileList["items"]) {
 function ListCard({
   display,
   toolName,
+  stateKey,
 }: {
   display: ChatToolDisplayFileList;
   toolName: string;
+  stateKey?: string;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
   const items = normalizeFileListItems(display.items);
   const title = display.title || toolName;
+  const hasPreview = items.length > 0;
+  const [viewState, setViewState] = useToolCardViewState(
+    stateKey,
+    "collapsed",
+  );
 
   return (
     <ToolCard>
-      <ToolCardHeader onClick={() => setExpanded(!expanded)} clickable>
+      <ToolCardHeader
+        onClick={() =>
+          hasPreview &&
+          setViewState((current) =>
+            current === "expanded" ? "collapsed" : "expanded",
+          )
+        }
+        clickable={hasPreview}
+      >
         <Search className="size-3 text-foreground/50" />
         <span className="min-w-0 truncate text-[12px] text-foreground">
           {title}
         </span>
 
-        <ChevronIcon expanded={expanded} className="ml-auto" />
+        {hasPreview && <ChevronIcon state={viewState} className="ml-auto" />}
       </ToolCardHeader>
-      {expanded && (
+      {viewState !== "collapsed" && (
         <TinyScrollArea
           className="border-t border-border-500"
           style={{ maxHeight: 300 }}
@@ -549,19 +785,40 @@ function TodoCard({
 function ToolInvocationCard({
   toolName,
   input,
+  onOpenFileAtLine,
 }: {
   toolName: string;
   input: JsonObject;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
 }) {
+  if (toolName === "Read") {
+    const fileName = getFileNameFromToolInput(input);
+    const filePath = getFilePathFromToolInput(input);
+    const navigationLine = getReadNavigationLineFromToolInput(input);
+
+    return (
+      <div className="flex items-center gap-2 px-1 py-0.5">
+        <ToolTitle shimmer className="min-w-0 truncate text-[12px]">
+          Reading...
+        </ToolTitle>
+        <ReadFilePill
+          fileName={fileName}
+          filePath={filePath}
+          line={navigationLine}
+          onOpenFileAtLine={onOpenFileAtLine}
+        />
+        <span className="size-2 rounded-full bg-sky animate-pulse" />
+      </div>
+    );
+  }
+
   const summary = summarizeToolInput(toolName, input);
 
   return (
     <ToolCard>
       <ToolCardHeader>
         <span className="size-2 rounded-full bg-sky animate-pulse" />
-        <span className="text-[12px] font-medium text-foreground">
-          {toolName}
-        </span>
+        <ToolTitle shimmer>{toolName}</ToolTitle>
         {summary && (
           <span className="min-w-0 truncate text-[11px] text-placeholder">
             {summary}
@@ -576,9 +833,11 @@ function ToolInvocationCard({
 
 export function ToolMessageRenderer({
   message,
+  onOpenFileAtLine,
   pairedResult,
 }: {
   message: ChatMessage;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
   pairedResult?: ChatMessage;
 }) {
   // Paired tool_use + tool_result → single card
@@ -587,7 +846,13 @@ export function ToolMessageRenderer({
     const result = pairedResult?.toolResult;
 
     if (!result) {
-      return <ToolInvocationCard toolName={toolName} input={input} />;
+      return (
+        <ToolInvocationCard
+          toolName={toolName}
+          input={input}
+          onOpenFileAtLine={onOpenFileAtLine}
+        />
+      );
     }
 
     const display = result.display;
@@ -597,9 +862,7 @@ export function ToolMessageRenderer({
         <ToolCard>
           <ToolCardHeader>
             <StatusDot status={result.isError ? "error" : "success"} />
-            <span className="text-[12px] font-medium text-foreground">
-              {toolName}
-            </span>
+            <ToolTitle>{toolName}</ToolTitle>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
             <CodeBlock maxHeight={300}>{result.outputText}</CodeBlock>
@@ -609,7 +872,13 @@ export function ToolMessageRenderer({
     }
 
     return (
-      <ToolDisplayCard display={display} toolName={toolName} input={input} />
+      <ToolDisplayCard
+        display={display}
+        toolName={toolName}
+        input={input}
+        onOpenFileAtLine={onOpenFileAtLine}
+        stateKey={result.toolCallId}
+      />
     );
   }
 
@@ -622,9 +891,7 @@ export function ToolMessageRenderer({
         <ToolCard>
           <ToolCardHeader>
             <StatusDot status={isError ? "error" : "success"} />
-            <span className="text-[12px] font-medium text-foreground">
-              {toolName}
-            </span>
+            <ToolTitle>{toolName}</ToolTitle>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
             <CodeBlock maxHeight={300}>{outputText}</CodeBlock>
@@ -633,7 +900,13 @@ export function ToolMessageRenderer({
       );
     }
     return (
-      <ToolDisplayCard display={display} toolName={toolName} input={input} />
+      <ToolDisplayCard
+        display={display}
+        toolName={toolName}
+        input={input}
+        onOpenFileAtLine={onOpenFileAtLine}
+        stateKey={message.toolResult.toolCallId}
+      />
     );
   }
 
@@ -644,22 +917,43 @@ function ToolDisplayCard({
   display,
   toolName,
   input,
+  onOpenFileAtLine,
+  stateKey,
 }: {
   display: ChatToolDisplay;
   toolName: string;
   input: JsonObject;
+  onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  stateKey?: string;
 }) {
   switch (display.kind) {
     case "command":
       return (
-        <TerminalCard toolName={toolName} input={input} display={display} />
+        <TerminalCard
+          toolName={toolName}
+          input={input}
+          display={display}
+          stateKey={stateKey}
+        />
       );
     case "diff":
-      return <DiffCard display={display} />;
+      return (
+        <DiffCard
+          display={display}
+          onOpenFileAtLine={onOpenFileAtLine}
+          stateKey={stateKey}
+        />
+      );
     case "input_output":
-      return <IOCard display={display} />;
+      return toolName === "Read" ? (
+        <ReadInline display={display} onOpenFileAtLine={onOpenFileAtLine} />
+      ) : (
+        <IOCard display={display} stateKey={stateKey} />
+      );
     case "file_list":
-      return <ListCard display={display} toolName={toolName} />;
+      return (
+        <ListCard display={display} toolName={toolName} stateKey={stateKey} />
+      );
     case "todo_list":
       return <TodoCard display={display} />;
     case "json":
@@ -667,9 +961,7 @@ function ToolDisplayCard({
         <ToolCard>
           <ToolCardHeader>
             <StatusDot status="success" />
-            <span className="text-[12px] font-medium text-foreground">
-              {toolName}
-            </span>
+            <ToolTitle>{toolName}</ToolTitle>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2">
             <CodeBlock maxHeight={300} language="json">
@@ -684,9 +976,7 @@ function ToolDisplayCard({
         <ToolCard>
           <ToolCardHeader>
             <StatusDot status="success" />
-            <span className="text-[12px] font-medium text-foreground">
-              {toolName}
-            </span>
+            <ToolTitle>{toolName}</ToolTitle>
           </ToolCardHeader>
           <div className="border-t border-border-500 px-2.5 py-2 text-[12px] text-foreground whitespace-pre-wrap">
             {display.text}

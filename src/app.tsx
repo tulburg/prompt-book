@@ -132,6 +132,14 @@ export default function App() {
 		await projectManager.saveActiveFile();
 	}, [activeFilePath, applicationSettings, projectManager]);
 
+	const handleOpenFileAtLine = React.useCallback(
+		async (path: string, line: number) => {
+			applicationSettings.deactivateSettings();
+			await projectManager.openFileAtLine(path, line);
+		},
+		[applicationSettings, projectManager],
+	);
+
 	return (
 		<div className="bg-panel flex h-screen w-screen flex-col">
 			<Header />
@@ -194,6 +202,7 @@ export default function App() {
 								activeFile={activeFile}
 								activeFilePath={activeFilePath}
 								activeSettings={applicationSettings.settings}
+								editorNavigationTarget={projectManager.editorNavigationTarget}
 								isBusy={projectManager.isBusy}
 								onChange={projectManager.updateActiveFileContent}
 								onActivateFile={handleActivateFile}
@@ -216,7 +225,7 @@ export default function App() {
 					minSize: 200,
 					defaultSize: 25,
 					children: (
-						<ChatPanel />
+						<ChatPanel onOpenFileAtLine={handleOpenFileAtLine} />
 					),
 				},
 				]}

@@ -3,6 +3,7 @@ import {
 	type ChatSession,
 	chatService,
 } from "@/lib/chat-service";
+import { parseAssistantRenderableContent } from "@/lib/chat/render-message-content";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 import type { ChatMode } from "@/lib/chat/types";
@@ -37,9 +38,10 @@ import * as React from "react";
 
 interface ChatPanelProps {
 	className?: string;
+	onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
 }
 
-export function ChatPanel({ className }: ChatPanelProps) {
+export function ChatPanel({ className, onOpenFileAtLine }: ChatPanelProps) {
 	const [sessions, setSessions] = React.useState<ChatSession[]>([]);
 	const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
 		null,
@@ -634,12 +636,19 @@ export function ChatPanel({ className }: ChatPanelProps) {
 										<ChatMessageItem
 											key={msg.id}
 											message={msg}
+											onOpenFileAtLine={onOpenFileAtLine}
 											pairedResult={pairedResult}
 										/>
 									);
 								}
 							}
-							return <ChatMessageItem key={msg.id} message={msg} />;
+							return (
+								<ChatMessageItem
+									key={msg.id}
+									message={msg}
+									onOpenFileAtLine={onOpenFileAtLine}
+								/>
+							);
 						})}
 						{isStreaming && (
 							<ChatMessageItem
@@ -770,10 +779,162 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 }
 
+const thinkingExpansionState = new Map<string, boolean>();
+
+function MessageCursor() {
+	return (
+		<span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">
+			|
+		</span>
+	);
+}
+
+function PlainMessageText({
+	content,
+	className,
+}: {
+	content: string;
+	className: string;
+}) {
+	return (
+		<div className={className}>
+			{content.split("\n").map((line, i) => (
+				<React.Fragment key={i}>
+					{i > 0 && <br />}
+					{line}
+				</React.Fragment>
+			))}
+		</div>
+	);
+}
+
+function ThinkingBlock({
+	messageId,
+	index,
+	content,
+	isClosed,
+	isStreaming,
+}: {
+	messageId: string;
+	index: number;
+	content: string;
+	isClosed: boolean;
+	isStreaming: boolean;
+}) {
+	const storageKey = `${messageId}:thinking:${index}`;
+	const preview = content.replace(/\s+/g, " ").trim();
+	const persistedExpanded = thinkingExpansionState.get(storageKey);
+	const [expanded, setExpanded] = React.useState(
+		persistedExpanded ?? (isStreaming || !isClosed),
+	);
+
+	React.useEffect(() => {
+		thinkingExpansionState.set(storageKey, expanded);
+	}, [expanded, storageKey]);
+
+	const toggleExpanded = React.useCallback(() => {
+		setExpanded((current) => !current);
+	}, []);
+
+	return (
+		<div className="my-2 overflow-hidden rounded-xl border border-border-500 bg-panel-300/80">
+			<button
+				type="button"
+				onClick={toggleExpanded}
+				className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-panel-400/80"
+				aria-expanded={expanded}
+			>
+				<ChevronDown
+					className={`h-3.5 w-3.5 shrink-0 text-placeholder transition-transform ${expanded ? "rotate-180" : ""}`}
+				/>
+				<div className="min-w-0 flex-1">
+					<div className="text-[11px] font-medium uppercase tracking-[0.18em] text-foreground/55">
+						{isStreaming && !isClosed ? "Thinking" : "Thought Process"}
+					</div>
+					{!expanded && preview && (
+						<div className="truncate pt-0.5 text-[12px] text-foreground/55">
+							{preview}
+						</div>
+					)}
+				</div>
+				{isStreaming && !isClosed && (
+					<span className="size-2 shrink-0 rounded-full bg-sky animate-pulse" />
+				)}
+			</button>
+			{expanded && (
+				<div className="border-t border-border-500 px-3 py-2 text-[12px] leading-relaxed text-foreground/65 whitespace-pre-wrap">
+					{content}
+					{isStreaming && !isClosed && <MessageCursor />}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function AssistantMessageContent({
+	message,
+	isNotice,
+}: {
+	message: ChatMessage;
+	isNotice: boolean;
+}) {
+	const parsed = React.useMemo(
+		() => parseAssistantRenderableContent(message.content),
+		[message.content],
+	);
+	const textClassName = `whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`;
+
+	if (!parsed.hasThinking) {
+		return (
+			<div>
+				<PlainMessageText
+					content={message.content}
+					className={textClassName}
+				/>
+				{message.isStreaming && <MessageCursor />}
+			</div>
+		);
+	}
+
+	return (
+		<div>
+			{parsed.segments.map((segment, index) =>
+				segment.kind === "text" ? (
+					segment.content ? (
+						<PlainMessageText
+							key={`${message.id}:text:${index}`}
+							content={segment.content}
+							className={textClassName}
+						/>
+					) : null
+				) : (
+					<ThinkingBlock
+						key={`${message.id}:thinking:${index}`}
+						messageId={message.id}
+						index={index}
+						content={segment.content}
+						isClosed={segment.isClosed}
+						isStreaming={Boolean(message.isStreaming)}
+					/>
+				),
+			)}
+			{message.isStreaming &&
+				!parsed.segments.some(
+					(segment) => segment.kind === "thinking" && !segment.isClosed,
+				) && <MessageCursor />}
+		</div>
+	);
+}
+
 function ChatMessageItem({
 	message,
+	onOpenFileAtLine,
 	pairedResult,
-}: { message: ChatMessage; pairedResult?: ChatMessage }) {
+}: {
+	message: ChatMessage;
+	pairedResult?: ChatMessage;
+	onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+}) {
 	const isUser = message.role === "user";
 	const isNotice =
 		message.role === "system" ||
@@ -797,29 +958,17 @@ function ChatMessageItem({
 				className={`w-full ${isUser ? "ml-auto w-fit max-w-[90%] rounded-2xl bg-panel-400 px-3 py-2" : isNotice ? "rounded-xl border border-border-500 bg-panel-300 px-3 py-2" : isToolMessage ? "" : ""}`}
 			>
 				{isToolMessage ? (
-					<ToolMessageRenderer message={message} pairedResult={pairedResult} />
+					<ToolMessageRenderer
+						message={message}
+						onOpenFileAtLine={onOpenFileAtLine}
+						pairedResult={pairedResult}
+					/>
 				) : message.isStreaming && !message.content ? (
-					<div className="flex gap-1 py-1">
-						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite] rounded-full bg-placeholder" />
-						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite_0.2s] rounded-full bg-placeholder" />
-						<span className="size-1.5 animate-[chat-dot-pulse_1.4s_ease-in-out_infinite_0.4s] rounded-full bg-placeholder" />
+					<div className="py-1 text-[13px] leading-relaxed">
+						<span className="tool-title-shimmer font-medium">Working...</span>
 					</div>
 				) : (
-					<div
-						className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`}
-					>
-						{message.content.split("\n").map((line, i) => (
-							<React.Fragment key={i}>
-								{i > 0 && <br />}
-								{line}
-							</React.Fragment>
-						))}
-						{message.isStreaming && (
-							<span className="animate-[chat-blink_0.8s_step-end_infinite] text-sky">
-								|
-							</span>
-						)}
-					</div>
+					<AssistantMessageContent message={message} isNotice={isNotice} />
 				)}
 			</div>
 		</div>

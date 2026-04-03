@@ -2,7 +2,7 @@
  * Integration test — hits the real llama-server at localhost:48123.
  * Mirrors exactly what the UI does: load model → build request → stream response.
  *
- * Run manually:  npx vitest run src/lib/chat/transports/llama-adapter.integration.test.ts
+ * Run manually:  npx vitest run src/__tests__/lib/chat/transports/llama-adapter.integration.test.ts
  */
 import { describe, expect, it } from "vitest";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLlamaServerArgs } from "./llama-config";
+import { buildLlamaServerArgs } from "../../handlers/llama-config";
 
 describe("llama server config", () => {
 	it("starts the local server with chat-safe defaults", () => {

@@ -221,6 +221,39 @@
   }
 }
 
+@keyframes tool-title-shimmer {
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: -200% 50%;
+  }
+}
+
+.tool-title-shimmer {
+  color: transparent;
+  background-image: linear-gradient(
+    110deg,
+    var(--color-foreground-700) 20%,
+    var(--color-foreground) 42%,
+    var(--color-sky-300) 50%,
+    var(--color-foreground) 58%,
+    var(--color-foreground-700) 80%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: tool-title-shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-title-shimmer {
+    color: var(--color-foreground);
+    background-image: none;
+    animation: none;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --color-background: 224 71.4% 4.1%;

@@ -25,6 +25,15 @@ function createTheme(monaco: MonacoModule) {
       "editorCursor.foreground": "#60a5fa",
       "editor.selectionBackground": "#e0e0e022",
       "editor.inactiveSelectionBackground": "#33415540",
+      "diffEditor.insertedLineBackground": "#163a24aa",
+      "diffEditor.removedLineBackground": "#472525aa",
+      "diffEditor.insertedTextBackground": "#1f5d37cc",
+      "diffEditor.removedTextBackground": "#6b2a2acc",
+      "diffEditor.diagonalFill": "#00000000",
+      "editorGutter.addedBackground": "#22c55e",
+      "editorGutter.deletedBackground": "#ef4444",
+      "editorOverviewRuler.addedForeground": "#22c55ecc",
+      "editorOverviewRuler.deletedForeground": "#ef4444cc",
     },
   });
 
