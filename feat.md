@@ -31,9 +31,18 @@ Sorry but its called ODEX - Omega Development Extension
 ### Contexts
 
 A context is pointer document. Its role is to point to all references of first contact information about any subject. i.e. for a codebase, 1 of those first contact information is package manager, run scripts etc. things to know without having to scan or search for them are what makes a context
-A context is pointer document. Its role is to point to all references of first contact information about any subject. i.e. for a codebase, 1 of those first contact information is package manager, run scripts etc. things to know without having to scan or search for them are what makes a context
+Its literarily the only persistent history of the project. All chat history are logs and can be deleted, the context is what they leave behind
 
 Do not general random texts. The format is simply
+
+### Blocks
+
+Blocks have a definition, a long explanation of what the block does in the project.
+They have history. An history of commits - from major prompts that made major changes to the block
+
+- Each of those history contains a log of all prompts and model reponses that makes up this major change
+  They have diagram - that shows how their internal works - function to function
+  Blocks have test scripts, you can run a test on a single block to see if every of its internals is working as expected
 
 ```
 Heading / Name of grouping:
@@ -46,7 +55,7 @@ Heading / Name of grouping:
 - - Build process and all important context the model will need to understand the codes base
 - These context(s) are built with title and list descriptions of what they provide
 - So when these context list is sent with the user message to the model, the model can decide which contexts to load into memory
-- Contexts can be design system context, codebase context, project context, environment context, deployment context etc.
+- Contexts can be design system context, codebase context, project context, environment context, deployment context, features context etc.
   ``
 
 ### Grill me skill
@@ -74,4 +83,3 @@ If a question can be answered by exploring the codebase, explore the codebase in
 - Notification / Result presentation (sandbox) / Verification and confirmation
 - Deployment
 - Logs
-
