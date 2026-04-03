@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_APPLICATION_SETTINGS } from "@/lib/application-settings";
 import { ChatService } from "@/lib/chat-service";
 
 describe("chat service", () => {
@@ -429,11 +430,7 @@ describe("chat service", () => {
 
 		await service.sendMessage("Hello Gemini", {
 			settings: {
-				"workbench.sidebar.visible": true,
-				"workbench.sidebar.sortOrder": "default",
-				"explorer.compactFolders": true,
-				"explorer.fileNesting.enabled": true,
-				"explorer.autoReveal": true,
+				...DEFAULT_APPLICATION_SETTINGS,
 				"chat.providers.google.apiKey": "test-key",
 			},
 		});
@@ -445,5 +442,130 @@ describe("chat service", () => {
 			"x-goog-api-key": "test-key",
 		});
 		expect(service.activeSession?.messages.at(-1)?.content).toBe("Gemini reply");
+	});
+
+	it("routes OpenAI models through the OpenAI transport when configured", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						const encoder = new TextEncoder();
+						controller.enqueue(
+							encoder.encode(
+								'data: {"choices":[{"delta":{"content":"OpenAI reply"}}]}\n\n',
+							),
+						);
+						controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+						controller.close();
+					},
+				}),
+				{
+					status: 200,
+					headers: { "Content-Type": "text/event-stream" },
+				},
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "gpt-5",
+			displayName: "GPT-5",
+			provider: "openai",
+		};
+		service.createSession();
+
+		await service.sendMessage("Hello OpenAI", {
+			settings: {
+				...DEFAULT_APPLICATION_SETTINGS,
+				"chat.providers.openai.apiKey": "test-key",
+			},
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(url).toContain("api.openai.com/v1/chat/completions");
+		expect(init.headers).toMatchObject({
+			Authorization: "Bearer test-key",
+		});
+		expect(service.activeSession?.messages.at(-1)?.content).toBe("OpenAI reply");
+	});
+
+	it("does not retry non-retryable OpenAI request-shape errors", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					error: {
+						type: "invalid_request_error",
+						message:
+							"Invalid schema for function 'StructuredOutput': In context=(), object schema missing properties.",
+					},
+				}),
+				{
+					status: 400,
+					headers: { "Content-Type": "application/json" },
+				},
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "gpt-5",
+			displayName: "GPT-5",
+			provider: "openai",
+		};
+		service.createSession();
+
+		await service.sendMessage("Hello OpenAI", {
+			settings: {
+				...DEFAULT_APPLICATION_SETTINGS,
+				"chat.providers.openai.apiKey": "test-key",
+			},
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(service.activeSession?.messages.at(-1)?.content).toBe(
+			"OpenAI request failed: Invalid schema for function 'StructuredOutput': In context=(), object schema missing properties.",
+		);
+	});
+
+	it("does not retry OpenAI rate limit errors", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					error: {
+						type: "rate_limit_error",
+						code: "insufficient_quota",
+						message: "You exceeded your current quota.",
+					},
+				}),
+				{
+					status: 429,
+					headers: { "Content-Type": "application/json" },
+				},
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "gpt-5",
+			displayName: "GPT-5",
+			provider: "openai",
+		};
+		service.createSession();
+
+		await service.sendMessage("Hello OpenAI", {
+			settings: {
+				...DEFAULT_APPLICATION_SETTINGS,
+				"chat.providers.openai.apiKey": "test-key",
+			},
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(service.activeSession?.messages.at(-1)?.content).toBe(
+			"OpenAI rate limit exceeded for gpt-5. Wait a moment and try again, or switch models.",
+		);
 	});
 });

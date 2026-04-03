@@ -9,6 +9,7 @@ import {
   isLocalChatModel,
   type ChatModelInfo,
 } from "@/lib/chat/chat-models";
+import { fetchOpenAiModels } from "@/lib/chat/openai-model-discovery";
 import { useApplicationSettings } from "@/lib/use-application-settings";
 import { parseAssistantRenderableContent } from "@/lib/chat/render-message-content";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
@@ -32,6 +33,7 @@ import {
 } from "@/lib/server-service";
 import Bus from "@/lib/bus";
 import { buildToolMessagePairingIndex } from "@/ui/higher/tool-message-pairing";
+import { MarkdownMessage } from "@/ui/higher/MarkdownMessage";
 import { DownloadIndicator } from "@/ui/lower/DownloadIndicator";
 import { Modal } from "@/ui/lower/Modal";
 import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
@@ -85,6 +87,9 @@ export function ChatPanel({
   const [downloadProgress, setDownloadProgress] = React.useState<
     Map<string, PullProgressEvent>
   >(new Map());
+  const [openAiModels, setOpenAiModels] = React.useState<ChatModelInfo[]>([]);
+  const [isLoadingOpenAiModels, setIsLoadingOpenAiModels] =
+    React.useState(false);
   const [isLoadingModel, setIsLoadingModel] = React.useState(false);
   const [streamingText, setStreamingText] = React.useState<string | null>(null);
   const [modePickerPos, setModePickerPos] = React.useState<{
@@ -103,9 +108,59 @@ export function ChatPanel({
   const modelButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
   const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
+  const hasGoogleGeminiConfigured = Boolean(
+    settings?.["chat.providers.google.apiKey"].trim(),
+  );
+  const hasAnthropicClaudeConfigured = Boolean(
+    settings?.["chat.providers.anthropic.apiKey"].trim(),
+  );
+  const hasOpenAiConfigured = Boolean(
+    settings?.["chat.providers.openai.apiKey"].trim(),
+  );
+
+  React.useEffect(() => {
+    const apiKey = settings?.["chat.providers.openai.apiKey"]?.trim() ?? "";
+    if (!apiKey) {
+      setOpenAiModels([]);
+      setIsLoadingOpenAiModels(false);
+      return;
+    }
+
+    let cancelled = false;
+    const abortController = new AbortController();
+    setIsLoadingOpenAiModels(true);
+
+    void fetchOpenAiModels(apiKey, { signal: abortController.signal })
+      .then((models) => {
+        if (!cancelled) {
+          setOpenAiModels(models);
+        }
+      })
+      .catch((error) => {
+        if (
+          cancelled ||
+          (error instanceof Error && error.name === "AbortError")
+        ) {
+          return;
+        }
+        console.error("[ChatPanel] Failed to fetch OpenAI models:", error);
+        setOpenAiModels([]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingOpenAiModels(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [settings?.["chat.providers.openai.apiKey"]]);
+
   const remoteModels = React.useMemo(
-    () => getConfiguredFrontierModels(settings),
-    [settings],
+    () => getConfiguredFrontierModels(settings, { openAiModels }),
+    [openAiModels, settings],
   );
   const availableModels = React.useMemo(
     () => [...installedModels, ...remoteModels],
@@ -436,7 +491,6 @@ export function ChatPanel({
   const messages = activeSession?.messages ?? [];
   const visibleStreamingText = streamingText;
   const activeDownloads = Array.from(downloadProgress.values());
-  const hasGoogleGemini = remoteModels.some((model) => model.provider === "google");
   const toolMessagePairing = React.useMemo(
     () => buildToolMessagePairingIndex(messages),
     [messages],
@@ -637,6 +691,18 @@ export function ChatPanel({
                         No chat models available
                       </div>
                     ) : null}
+                    {hasOpenAiConfigured && isLoadingOpenAiModels ? (
+                      <div className="px-2 py-1 text-xs text-placeholder">
+                        Loading OpenAI models...
+                      </div>
+                    ) : null}
+                    {hasOpenAiConfigured &&
+                    !isLoadingOpenAiModels &&
+                    openAiModels.length === 0 ? (
+                      <div className="px-2 py-1 text-xs text-placeholder">
+                        No OpenAI chat models available for this API key.
+                      </div>
+                    ) : null}
                     <div className="my-1 h-px bg-border-500" />
                     <button
                       className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
@@ -645,16 +711,38 @@ export function ChatPanel({
                       <Download className="mr-2 h-3.5 w-3.5" />
                       Add Local Model...
                     </button>
-                    {!hasGoogleGemini && (
-                        <button
+                    {!hasGoogleGeminiConfigured && (
+                      <button
                         className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
                         onClick={() => {
                           setShowModelPicker(false);
                           Bus.emit("settings:open", undefined);
                         }}
-                        >
+                      >
                         Configure Google Gemini...
-                        </button>
+                      </button>
+                    )}
+                    {!hasAnthropicClaudeConfigured && (
+                      <button
+                        className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
+                        onClick={() => {
+                          setShowModelPicker(false);
+                          Bus.emit("settings:open", undefined);
+                        }}
+                      >
+                        Configure Anthropic Claude...
+                      </button>
+                    )}
+                    {!hasOpenAiConfigured && (
+                      <button
+                        className="flex w-full cursor-pointer items-center rounded px-2 py-1.5 border-none bg-transparent text-left text-xs text-foreground hover:bg-border-500"
+                        onClick={() => {
+                          setShowModelPicker(false);
+                          Bus.emit("settings:open", undefined);
+                        }}
+                      >
+                        Configure OpenAI...
+                      </button>
                     )}
                   </div>
                 )}
@@ -942,25 +1030,6 @@ function MessageCursor() {
   );
 }
 
-function PlainMessageText({
-  content,
-  className,
-}: {
-  content: string;
-  className: string;
-}) {
-  return (
-    <div className={className}>
-      {content.split("\n").map((line, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <br />}
-          {line}
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
-
 function ThinkingBlock({
   messageId,
   index,
@@ -1005,10 +1074,8 @@ function ThinkingBlock({
             className="overflow-auto px-3 py-2"
             style={{ maxHeight: 160 }}
           >
-            <div className="text-[12px] leading-relaxed text-foreground/55 whitespace-pre-wrap">
-              {content}
-              {isActivelyStreaming && <MessageCursor />}
-            </div>
+            <MarkdownMessage content={content} variant="thinking" />
+            {isActivelyStreaming && <MessageCursor />}
           </div>
           {!isActivelyStreaming && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-panel-700 to-transparent" />
@@ -1054,12 +1121,12 @@ function AssistantMessageContent({
     () => parseAssistantRenderableContent(message.content),
     [message.content],
   );
-  const textClassName = `whitespace-pre-wrap break-words text-[13px] leading-relaxed ${isNotice ? "text-foreground-900" : "text-foreground"}`;
+  const textClassName = isNotice ? "text-foreground-900" : "";
 
   if (!parsed.hasThinking) {
     return (
       <div>
-        <PlainMessageText content={message.content} className={textClassName} />
+        <MarkdownMessage content={message.content} className={textClassName} />
         {message.isStreaming && <MessageCursor />}
       </div>
     );
@@ -1070,7 +1137,7 @@ function AssistantMessageContent({
       {parsed.segments.map((segment, index) =>
         segment.kind === "text" ? (
           segment.content ? (
-            <PlainMessageText
+            <MarkdownMessage
               key={`${message.id}:text:${index}`}
               content={segment.content}
               className={textClassName}

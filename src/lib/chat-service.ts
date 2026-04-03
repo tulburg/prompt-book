@@ -6,8 +6,10 @@ import type { ChatModelInfo } from "./chat/chat-models";
 import { executeToolCalls } from "./chat/tools/tool-orchestration";
 import { createToolContext } from "./chat/tools/tool-runtime";
 import type { JsonObject } from "./chat/tools/tool-types";
+import { AnthropicChatAdapter } from "./chat/transports/anthropic-adapter";
 import { GeminiChatAdapter } from "./chat/transports/gemini-adapter";
 import { LlamaChatAdapter } from "./chat/transports/llama-adapter";
+import { OpenAiChatAdapter } from "./chat/transports/openai-adapter";
 import type {
 	ChatMessage,
 	ChatMode,
@@ -19,6 +21,15 @@ import type { ApplicationSettings } from "./application-settings";
 import { llamaServerService } from "./server-service";
 
 type Listener<T> = (value: T) => void;
+
+function isNonRetryableStreamError(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"retryable" in error &&
+		(error as { retryable?: boolean }).retryable === false
+	);
+}
 
 function sanitizeAssistantToolEchoes(
 	content: string,
@@ -112,6 +123,8 @@ export class ChatService {
 	private readonly store = new ChatSessionStore();
 	private readonly llamaTransport = new LlamaChatAdapter();
 	private readonly geminiTransport = new GeminiChatAdapter();
+	private readonly anthropicTransport = new AnthropicChatAdapter();
+	private readonly openAiTransport = new OpenAiChatAdapter();
 	private _currentModel: ChatModelInfo | null = null;
 	private _abortController: AbortController | null = null;
 	private _stopRequested = false;
@@ -366,7 +379,10 @@ export class ChatService {
 						}
 						const errMsg = streamError instanceof Error ? streamError.message : String(streamError);
 						console.error(`[ChatService] Stream error on iteration ${iteration + 1}, attempt ${streamAttempt + 1}: ${errMsg}`);
-						if (streamAttempt >= MAX_STREAM_RETRIES) {
+						if (
+							streamAttempt >= MAX_STREAM_RETRIES ||
+							isNonRetryableStreamError(streamError)
+						) {
 							throw streamError;
 						}
 					}
@@ -554,6 +570,20 @@ export class ChatService {
 			settings?: ApplicationSettings | null;
 		},
 	) {
+		if (request.metadata.provider === "openai") {
+			return this.openAiTransport.stream(request, {
+				signal: options.signal,
+				apiKey: options.settings?.["chat.providers.openai.apiKey"],
+			});
+		}
+
+		if (request.metadata.provider === "anthropic") {
+			return this.anthropicTransport.stream(request, {
+				signal: options.signal,
+				apiKey: options.settings?.["chat.providers.anthropic.apiKey"],
+			});
+		}
+
 		if (request.metadata.provider === "google") {
 			return this.geminiTransport.stream(request, {
 				signal: options.signal,

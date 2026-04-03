@@ -199,7 +199,7 @@ function TimelineRow({
           {filePath && onOpenFileAtLine && (
             <button
               type="button"
-              className="inline-flex min-w-0 items-center gap-1 text-[12px] text-foreground/60 transition-colors hover:text-foreground"
+              className="inline-flex min-w-0 items-center gap-1 text-[12px] text-foreground/60 transition-colors hover:text-foreground border border-border-500 rounded-[6px] pl-1 pr-2 py-0.5 hover:bg-panel-600 cursor-pointer"
               onClick={() => void onOpenFileAtLine(filePath, fileLine ?? 1)}
               title={`Open ${filePath}`}
             >
@@ -213,14 +213,6 @@ function TimelineRow({
         </div>
         {children}
       </div>
-    </div>
-  );
-}
-
-function ThinkingDot() {
-  return (
-    <div className="relative z-[1] flex size-[20px] shrink-0 items-center justify-center">
-      <span className="thinking-glow-dot block size-2 rounded-full bg-sky" />
     </div>
   );
 }
@@ -470,8 +462,12 @@ function TodoListInline({
 function summarizeTodoDisplay(
   display: Extract<ChatToolDisplay, { kind: "todo_list" }>,
 ): string {
-  const completed = display.items.filter((item) => item.status === "completed").length;
-  const inProgress = display.items.find((item) => item.status === "in_progress");
+  const completed = display.items.filter(
+    (item) => item.status === "completed",
+  ).length;
+  const inProgress = display.items.find(
+    (item) => item.status === "in_progress",
+  );
   if (inProgress) {
     return `${inProgress.content} (${completed + 1}/${display.items.length})`;
   }
@@ -481,15 +477,13 @@ function summarizeTodoDisplay(
   return `${display.items.length} task${display.items.length === 1 ? "" : "s"}`;
 }
 
-function QuestionPreview({
-  display,
-}: {
-  display: ChatToolDisplayQuestion;
-}) {
+function QuestionPreview({ display }: { display: ChatToolDisplayQuestion }) {
   return (
     <div className="space-y-3 px-3 py-2">
       {display.description && (
-        <div className="text-[12px] text-foreground/75">{display.description}</div>
+        <div className="text-[12px] text-foreground/75">
+          {display.description}
+        </div>
       )}
       {display.questions.map((question, index) => (
         <div
@@ -532,11 +526,7 @@ function QuestionPreview({
   );
 }
 
-function TaskStatusPill({
-  status,
-}: {
-  status: ChatToolDisplayTask["status"];
-}) {
+function TaskStatusPill({ status }: { status: ChatToolDisplayTask["status"] }) {
   const className =
     status === "completed"
       ? "text-green-400 bg-green-500/10"
@@ -552,17 +542,15 @@ function TaskStatusPill({
   );
 }
 
-function TaskPreview({
-  display,
-}: {
-  display: ChatToolDisplayTask;
-}) {
+function TaskPreview({ display }: { display: ChatToolDisplayTask }) {
   return (
     <div className="space-y-3 px-3 py-2">
       <div className="flex items-center gap-2">
         <TaskStatusPill status={display.status} />
         {display.agentName && (
-          <span className="text-[11px] text-foreground/60">{display.agentName}</span>
+          <span className="text-[11px] text-foreground/60">
+            {display.agentName}
+          </span>
         )}
       </div>
       <div className="text-[12px] text-foreground">{display.summary}</div>
@@ -646,6 +634,7 @@ interface ToolAction {
 function buildToolAction(
   toolName: string,
   input: JsonObject,
+  canOpenFile: boolean,
   result:
     | {
         display?: ChatToolDisplay;
@@ -670,6 +659,7 @@ function buildToolAction(
           ? getIOCardFilePath(display)
           : getFilePathFromToolInput(input);
       const line = getReadNavigationLineFromToolInput(input);
+      const showInlineFileName = !filePath || !canOpenFile;
 
       const readLabel = isRunning ? (
         <span className="tool-title-shimmer">
@@ -681,12 +671,13 @@ function buildToolAction(
         <span>Read</span>
       );
 
-      const fileRef = fileName ? (
-        <span className="inline-flex items-center gap-1">
-          <FileIcon fileName={fileName} />
-          <span className="text-foreground/60">{fileName}</span>
-        </span>
-      ) : null;
+      const fileRef =
+        fileName && showInlineFileName ? (
+          <span className="inline-flex items-center gap-1 rounded border border-red-500 px-1.5 py-0.5">
+            <FileIcon fileName={fileName} />{" "}
+            <span className="text-foreground/60">{fileName}</span>
+          </span>
+        ) : null;
 
       const label = (
         <span className="inline-flex items-center gap-1.5">
@@ -729,10 +720,18 @@ function buildToolAction(
     case "Write": {
       const fileName = getFileNameFromToolInput(input);
       const filePath = getFilePathFromToolInput(input);
+      const showInlineFileName = !filePath || !canOpenFile;
+      const inlineFileRef = fileName && showInlineFileName && (
+        <span className="inline-flex items-center gap-1">
+          <FileIcon fileName={fileName} />
+          <span className="text-foreground/60">{fileName}</span>
+        </span>
+      );
 
       if (display?.kind === "diff") {
         const diff = display;
         const diffFileName = diff.filePath.split("/").pop() || diff.filePath;
+        const showInlineDiffFileName = !canOpenFile;
         const actionVerb =
           diff.action === "created"
             ? isRunning
@@ -747,10 +746,12 @@ function buildToolAction(
             <span className={isRunning ? "tool-title-shimmer" : ""}>
               {actionVerb}
             </span>
-            <span className="inline-flex items-center gap-1">
-              <FileIcon fileName={diffFileName} />
-              <span className="text-foreground/60">{diffFileName}</span>
-            </span>
+            {showInlineDiffFileName && (
+              <span className="inline-flex items-center gap-1">
+                <FileIcon fileName={diffFileName} />
+                <span className="text-foreground/60">{diffFileName}</span>
+              </span>
+            )}
             <DiffStatsPill
               additions={diff.additions}
               deletions={diff.deletions}
@@ -824,22 +825,12 @@ function buildToolAction(
           <span className="tool-title-shimmer">
             {toolName === "Write" ? "Writing" : "Editing"}
           </span>
-          {fileName && (
-            <span className="inline-flex items-center gap-1">
-              <FileIcon fileName={fileName} />
-              <span className="text-foreground/60">{fileName}</span>
-            </span>
-          )}
+          {inlineFileRef}
         </span>
       ) : (
         <span className="inline-flex items-center gap-1.5">
           <span>{toolName === "Write" ? "Wrote" : "Edited"}</span>
-          {fileName && (
-            <span className="inline-flex items-center gap-1">
-              <FileIcon fileName={fileName} />
-              <span className="text-foreground/60">{fileName}</span>
-            </span>
-          )}
+          {inlineFileRef}
         </span>
       );
 
@@ -917,10 +908,10 @@ function buildToolAction(
           )}
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 wrap flex-wrap">
           <span>Searched</span>
           {pattern && (
-            <span className="text-foreground/50 font-mono text-[11px]">
+            <span className="text-foreground/50 font-mono text-[11px] flex flex-wrap max-w-[100%] break-all">
               {pattern}
             </span>
           )}
@@ -1062,7 +1053,9 @@ function buildToolAction(
     case "TaskList":
     case "TaskUpdate": {
       const listDisplay = display?.kind === "todo_list" ? display : undefined;
-      const taskSummary = listDisplay ? summarizeTodoDisplay(listDisplay) : "Tasks";
+      const taskSummary = listDisplay
+        ? summarizeTodoDisplay(listDisplay)
+        : "Tasks";
       const todoLabel = isRunning ? (
         <span className="tool-title-shimmer">Updating tasks</span>
       ) : (
@@ -1073,7 +1066,9 @@ function buildToolAction(
               : "Updated tasks"}
           </span>
           {listDisplay && (
-            <span className="text-[11px] text-foreground/50">{taskSummary}</span>
+            <span className="text-[11px] text-foreground/50">
+              {taskSummary}
+            </span>
           )}
         </span>
       );
@@ -1105,7 +1100,8 @@ function buildToolAction(
     }
 
     case "AskUserQuestion": {
-      const questionDisplay = display?.kind === "question" ? display : undefined;
+      const questionDisplay =
+        display?.kind === "question" ? display : undefined;
       const questionCount = questionDisplay?.questions.length ?? 0;
       const label = isRunning ? (
         <span className="tool-title-shimmer">Preparing question</span>
@@ -1321,9 +1317,15 @@ function summarizeToolInput(
       return (input.title as string) || (input.prompt as string) || "Question";
     case "Agent":
     case "Task":
-      return (input.description as string) || (input.prompt as string) || "Delegated task";
+      return (
+        (input.description as string) ||
+        (input.prompt as string) ||
+        "Delegated task"
+      );
     case "TaskOutput":
-      return (input.task_id as string) || (input.agent_id as string) || "Task output";
+      return (
+        (input.task_id as string) || (input.agent_id as string) || "Task output"
+      );
     default:
       return null;
   }
@@ -1378,6 +1380,7 @@ export function ToolMessageRenderer({
     const action = buildToolAction(
       toolName,
       input,
+      Boolean(onOpenFileAtLine),
       result
         ? {
             display: result.display,
@@ -1410,6 +1413,7 @@ export function ToolMessageRenderer({
     const action = buildToolAction(
       toolName,
       input,
+      Boolean(onOpenFileAtLine),
       { display, isError, outputText },
       toolCallId,
     );
@@ -1436,33 +1440,25 @@ export function ToolMessageRenderer({
 
 export function ThinkingTimelineRow({
   isStreaming,
-  isLast = false,
   children,
 }: {
   isStreaming: boolean;
-  isLast?: boolean;
   children?: React.ReactNode;
 }) {
   return (
-    <div className="relative flex gap-3 pb-0.5">
-      {!isLast && (
-        <div className="absolute left-[9px] top-[24px] bottom-0 w-px bg-border-500" />
-      )}
-      <ThinkingDot />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5 pb-3">
-        <div className="flex min-h-[20px] items-center">
-          <span className="text-[12.5px] text-foreground/60">
-            {isStreaming ? (
-              <span className="tool-title-shimmer">
-                Thinking through the process
-              </span>
-            ) : (
-              "Thought process"
-            )}
-          </span>
-        </div>
-        {children}
+    <div className="flex min-w-0 flex-1 flex-col gap-1.5 pb-3">
+      <div className="flex min-h-[20px] items-center">
+        <span className="text-[12.5px] text-foreground/60">
+          {isStreaming ? (
+            <span className="tool-title-shimmer">
+              Thinking through the process
+            </span>
+          ) : (
+            "Thought process"
+          )}
+        </span>
       </div>
+      {children}
     </div>
   );
 }

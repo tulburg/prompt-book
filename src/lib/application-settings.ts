@@ -9,6 +9,8 @@ export interface ApplicationSettings {
 	"explorer.fileNesting.enabled": boolean;
 	"explorer.autoReveal": boolean;
 	"chat.providers.google.apiKey": string;
+	"chat.providers.anthropic.apiKey": string;
+	"chat.providers.openai.apiKey": string;
 }
 
 export type ApplicationSettingKey = keyof ApplicationSettings;
@@ -79,6 +81,8 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
 	"explorer.fileNesting.enabled": true,
 	"explorer.autoReveal": true,
 	"chat.providers.google.apiKey": "",
+	"chat.providers.anthropic.apiKey": "",
+	"chat.providers.openai.apiKey": "",
 };
 
 export const APPLICATION_SETTINGS_GROUPS: ApplicationSettingsGroup[] = [
@@ -194,6 +198,35 @@ export const APPLICATION_SETTINGS_REGISTRY: ApplicationSettingDescriptor[] = [
 		placeholder: "AIza...",
 		keywords: ["chat", "gemini", "google", "api", "key", "models"],
 	},
+	{
+		key: "chat.providers.anthropic.apiKey",
+		section: "chat",
+		subsection: "Providers",
+		order: 2,
+		label: "Anthropic API Key",
+		categoryLabel: "Chat",
+		description:
+			"Adds Claude models to the chat model picker when a valid Anthropic API key is configured.",
+		control: "password",
+		defaultValue:
+			DEFAULT_APPLICATION_SETTINGS["chat.providers.anthropic.apiKey"],
+		placeholder: "sk-ant-...",
+		keywords: ["chat", "anthropic", "claude", "api", "key", "models"],
+	},
+	{
+		key: "chat.providers.openai.apiKey",
+		section: "chat",
+		subsection: "Providers",
+		order: 3,
+		label: "OpenAI API Key",
+		categoryLabel: "Chat",
+		description:
+			"Adds OpenAI models to the chat model picker when a valid OpenAI API key is configured.",
+		control: "password",
+		defaultValue: DEFAULT_APPLICATION_SETTINGS["chat.providers.openai.apiKey"],
+		placeholder: "sk-...",
+		keywords: ["chat", "openai", "gpt", "api", "key", "models"],
+	},
 ];
 
 export function serializeApplicationSettings(settings: ApplicationSettings) {
@@ -251,6 +284,16 @@ export function sanitizeApplicationSettings(
 	if (typeof candidate["chat.providers.google.apiKey"] === "string") {
 		nextSettings["chat.providers.google.apiKey"] =
 			candidate["chat.providers.google.apiKey"];
+	}
+
+	if (typeof candidate["chat.providers.anthropic.apiKey"] === "string") {
+		nextSettings["chat.providers.anthropic.apiKey"] =
+			candidate["chat.providers.anthropic.apiKey"];
+	}
+
+	if (typeof candidate["chat.providers.openai.apiKey"] === "string") {
+		nextSettings["chat.providers.openai.apiKey"] =
+			candidate["chat.providers.openai.apiKey"];
 	}
 
 	return nextSettings;

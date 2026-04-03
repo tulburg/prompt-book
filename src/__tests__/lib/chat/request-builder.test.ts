@@ -472,4 +472,123 @@ describe("request builder", () => {
 			name: "Read",
 		});
 	});
+
+	it("formats Anthropic requests with text tool history and anthropic provider metadata", () => {
+		const session: ChatSessionState = {
+			id: "session-claude",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "claude-sonnet-4-6",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Inspect the workspace",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+				createTranscriptEntry({
+					role: "assistant",
+					content: 'Read({"file_path":"/workspace/file.txt"})',
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_use",
+					toolInvocation: {
+						toolCallId: "tool-claude",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+					},
+				}),
+				createTranscriptEntry({
+					role: "tool",
+					content: "file contents",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "tool_result",
+					toolResult: {
+						toolCallId: "tool-claude",
+						toolName: "Read",
+						input: { file_path: "/workspace/file.txt" },
+						outputText: "file contents",
+					},
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "claude-sonnet-4-6",
+			modelName: "Claude Sonnet 4.6",
+			provider: "anthropic",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.format).toBe("anthropic");
+		expect(request.nativeToolCalling).toBe(false);
+		expect(request.metadata.provider).toBe("anthropic");
+		expect(request.messages).toContainEqual({
+			role: "assistant",
+			content: [
+				{
+					type: "text",
+					text: 'Read({"file_path":"/workspace/file.txt"})',
+				},
+			],
+		});
+		expect(
+			request.messages.some(
+				(message) =>
+					message.role === "user" &&
+					message.tool_call_id === "tool-claude" &&
+					message.name === "Read",
+			),
+		).toBe(true);
+	});
+
+	it("formats OpenAI requests with native tool metadata", () => {
+		const session: ChatSessionState = {
+			id: "session-openai",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "gpt-5",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Inspect the workspace",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "gpt-5",
+			modelName: "GPT-5",
+			provider: "openai",
+			toolContext: fakeToolContext,
+		});
+
+		expect(request.format).toBe("openai");
+		expect(request.nativeToolCalling).toBe(true);
+		expect(request.metadata.provider).toBe("openai");
+		expect(request.tools?.length ?? 0).toBeGreaterThan(0);
+	});
 });

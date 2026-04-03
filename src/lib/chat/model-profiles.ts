@@ -23,7 +23,8 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 	{
 		id: "openai",
 		modelFamilies: ["openai"],
-		modelNameTokens: ["openai/", "gpt-oss", "gpt_oss"],
+		exactModelIds: ["gpt-5", "gpt-5-mini", "gpt-5-nano"],
+		modelNameTokens: ["openai/", "gpt-oss", "gpt_oss", "gpt-4", "gpt-4o", "gpt-5"],
 		contextStyle: "plain_sections",
 		injectUserContext: false,
 		collapseSystemSections: false,
@@ -85,7 +86,7 @@ const CHAT_MODEL_PROFILES: readonly ChatModelProfile[] = [
 		collapseSystemSections: false,
 		insertToolGuidance: false,
 		insertThinkingGuidance: false,
-		toolResultMode: "tool",
+		toolResultMode: "user",
 		httpRolePattern: "openai",
 		systemSeparator: "\n\n",
 		nativeToolCalling: "unsupported",
