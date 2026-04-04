@@ -1503,7 +1503,7 @@ export function ChatPanel({
               <div ref={messagesEndRef} />
             </div>
             {showScrollToBottom && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+              <div className="pointer-events-none sticky inset-x-0 bottom-4 z-10 flex justify-center px-4">
                 <button
                   type="button"
                   className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-border-500 bg-panel-600 px-3 py-1.5 text-xs text-foreground shadow-[0_6px_18px_rgba(0,0,0,0.28)] transition-colors hover:bg-panel-500"
