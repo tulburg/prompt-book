@@ -92,6 +92,7 @@ export function ChatPanel({
     React.useState(false);
   const [isLoadingModel, setIsLoadingModel] = React.useState(false);
   const [streamingText, setStreamingText] = React.useState<string | null>(null);
+  const [showHistory, setShowHistory] = React.useState(false);
   const [modePickerPos, setModePickerPos] = React.useState<{
     top: number;
     left: number;
@@ -107,6 +108,7 @@ export function ChatPanel({
   const modeButtonRef = React.useRef<HTMLButtonElement>(null);
   const modelButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
+  const historyRef = React.useRef<HTMLDivElement>(null);
   const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
   const hasGoogleGeminiConfigured = Boolean(
     settings?.["chat.providers.google.apiKey"].trim(),
@@ -407,6 +409,18 @@ export function ChatPanel({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   };
 
+  // Close history popup on click outside
+  React.useEffect(() => {
+    if (!showHistory) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [showHistory]);
+
   const handleNewChat = () => {
     const session = chatService.createSession();
     activeSessionIdRef.current = session.id;
@@ -498,7 +512,7 @@ export function ChatPanel({
 
   return (
     <div
-      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
+      className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
     >
       {/* Tab bar */}
       <div className="flex h-[35px] shrink-0 items-center justify-between border-b border-border-500 px-1">
@@ -547,7 +561,10 @@ export function ChatPanel({
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
-          <button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
+          <button
+            className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+            onClick={() => setShowHistory((v) => !v)}
+          >
             <Clock className="h-3.5 w-3.5" />
           </button>
           <button className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground">
@@ -555,6 +572,60 @@ export function ChatPanel({
           </button>
         </div>
       </div>
+
+      {/* History popup */}
+      {showHistory && (
+        <div
+          ref={historyRef}
+          className="absolute right-2 top-[40px] z-50 flex max-h-[320px] w-[280px] flex-col rounded-lg border border-border-500 bg-panel shadow-lg"
+        >
+          <div className="flex items-center justify-between border-b border-border-500 px-3 py-2">
+            <span className="text-xs font-semibold text-foreground">History</span>
+            <button
+              className="flex size-5 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+              onClick={() => setShowHistory(false)}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {chatService.historySessions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-foreground-900">
+                No past sessions
+              </div>
+            ) : (
+              chatService.historySessions.map((session) => (
+                <button
+                  key={session.id}
+                  className="flex w-full cursor-pointer flex-col gap-0.5 border-none bg-transparent px-3 py-2 text-left hover:bg-border-500"
+                  onClick={() => {
+                    chatService.restoreSession(session.id);
+                    activeSessionIdRef.current = session.id;
+                    setActiveSession(chatService.activeSession);
+                    setSessions([...chatService.sessions]);
+                    setShowHistory(false);
+                  }}
+                >
+                  <span className="truncate text-xs font-medium text-foreground">
+                    {session.title}
+                  </span>
+                  <span className="text-[10px] text-foreground-900">
+                    {new Date(session.closedAt!).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}{" "}
+                    &middot;{" "}
+                    {new Date(session.closedAt!).toLocaleTimeString(undefined, {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Input area at bottom */}
       <div className="order-2 flex shrink-0 flex-col gap-1 border-t border-border-500 px-3 py-2">

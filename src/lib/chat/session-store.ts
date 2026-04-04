@@ -216,6 +216,17 @@ export class ChatSessionStore {
 		return this.getActiveSnapshot();
 	}
 
+	restoreSession(sessionId: string): ChatSession | null {
+		const session = this.sessions.find(
+			(candidate) => candidate.id === sessionId && candidate.closedAt != null,
+		);
+		if (!session) return null;
+		session.closedAt = null;
+		this.activeSessionId = session.id;
+		this.persist();
+		return this.getActiveSnapshot();
+	}
+
 	setActiveSession(sessionId: string): ChatSession | null {
 		const exists = this.sessions.some(
 			(session) => session.id === sessionId && session.closedAt == null,

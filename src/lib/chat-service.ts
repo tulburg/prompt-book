@@ -193,6 +193,13 @@ export class ChatService {
 		}
 	}
 
+	restoreSession(sessionId: string): void {
+		const session = this.store.restoreSession(sessionId);
+		if (session) {
+			this._onDidUpdateSession.fire(session);
+		}
+	}
+
 	closeSession(sessionId: string): void {
 		if (this._streamingSessionId === sessionId) {
 			this.stopGeneration();
