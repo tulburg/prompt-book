@@ -1,5 +1,6 @@
 import {
 	Menu,
+	Network,
 	Search,
 	Settings,
 	Sidebar as SidebarIcon,
@@ -106,6 +107,15 @@ export function Header() {
 			</div>
 
 			<div className={`flex items-center gap-1 ${noDragClass}`}>
+				<Button
+					size="icon"
+					variant="ghost"
+					className="h-7 w-7"
+					aria-label="Open flow viewer"
+					onClick={() => Bus.emit("mermaid:open", undefined)}
+				>
+					<Network className="h-4 w-4" />
+				</Button>
 				<Button
 					size="icon"
 					variant="ghost"

@@ -6,7 +6,7 @@ import { useGitStatus } from "@/lib/use-git-status";
 import { useApplicationSettings } from "@/lib/use-application-settings";
 import { useProjectManager } from "@/lib/use-project-manager";
 import type { ProjectNode } from "@/lib/project-files";
-import { ChatPanel, FrameHost, Header, PromptEditor, Sidebar } from "@/ui";
+import { ChatPanel, FrameHost, Header, MermaidViewer, PromptEditor, Sidebar } from "@/ui";
 import * as React from "react";
 
 export default function App() {
@@ -17,6 +17,7 @@ export default function App() {
 		projectManager.project,
 		projectManager.projectBridge,
 	);
+	const [mermaidOpen, setMermaidOpen] = React.useState(false);
 	const isSidebarVisible = settings?.["workbench.sidebar.visible"] ?? true;
 	const sidebarSortOrder =
 		settings?.["workbench.sidebar.sortOrder"] ?? "default";
@@ -37,10 +38,14 @@ export default function App() {
 			);
 		};
 
+		const handleMermaidOpen = () => setMermaidOpen((prev) => !prev);
+
 		Bus.on("sidebar:toggle", handleSidebarToggle);
+		Bus.on("mermaid:open", handleMermaidOpen);
 
 		return () => {
 			Bus.off("sidebar:toggle", handleSidebarToggle);
+			Bus.off("mermaid:open", handleMermaidOpen);
 		};
 	}, [applicationSettings.updateSetting, settings]);
 
@@ -230,6 +235,7 @@ export default function App() {
 					},
 				]}
 			/>
+			<MermaidViewer open={mermaidOpen} onClose={() => setMermaidOpen(false)} />
 		</div>
 	);
 }
