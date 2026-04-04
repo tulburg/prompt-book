@@ -19,6 +19,7 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 		"List, read, and write persistent project context records.",
 		"Context files live in .odex/context under the current project.",
 		"Use list before execution, read at least one relevant context, and write back after major changes.",
+		"Use write to create a missing context; do not use read for contexts that are not listed yet.",
 	].join(" "),
 	inputSchema: {
 		type: "object",
@@ -26,11 +27,11 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 			action: {
 				type: "string",
 				enum: ["list", "read", "write"],
-				description: "Which context operation to perform.",
+				description: 'Which context operation to perform. Use "list" before reads. Use "write" to create or update contexts.',
 			},
 			filename: {
 				type: "string",
-				description: "Markdown filename inside .odex/context, for example codebase.md.",
+				description: 'Markdown filename inside .odex/context, for example codebase.md. For new contexts, provide the desired filename with action "write".',
 			},
 			title: {
 				type: "string",
@@ -65,12 +66,12 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 		if (action === "list") {
 			const items = await context.listContexts();
 			if (items.length === 0) {
-				return textResult("No context files found in .odex/context.", {
-					kind: "file_list",
-					title: ".odex/context",
-					subtitle: "0 contexts",
-					items: [],
-				});
+			return textResult('No context files found in .odex/context. Use Context with action "write" to create the first context.', {
+				kind: "file_list",
+				title: ".odex/context",
+				subtitle: "0 contexts",
+				items: [],
+			});
 			}
 
 			const output = items

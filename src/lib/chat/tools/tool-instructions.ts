@@ -15,13 +15,16 @@ function buildContextPolicyLines(tools: ChatToolDefinition[]): string[] {
 
 	return [
 		"- CRITICAL: Listing context is the first thing to do before any executions. Call `Context` with `action: \"list\"` before proceeding.",
+		"- CRITICAL: Before using `Context` with `action: \"read\"`, call `Context` with `action: \"list\"` unless the context was already returned earlier in the session.",
+		"- Never guess or invent context filenames for read operations. If a needed context is missing, create it with `Context` and `action: \"write\"`.",
 		"- CRITICAL: From the provided context list, you must load at least 1 context with `Context` and `action: \"read\"` before proceeding.",
 		"- If the list is empty or no existing context fits the current change, create one with `Context` and `action: \"write\"`, including a markdown filename like `codebase.md`, a title, a description, and a paragraph, then read it before continuing.",
 		"- After every major change, add a paragraph record for future use with `Context` and `action: \"write\"`.",
 		"- When a major change changes the scope of a context, update that context's title and description in the same `Context` write call.",
+		"- CRITICAL: After you make project changes, update at least 1 affected context with `Context` and `action: \"write\"` before finishing.",
 		"- Apply these context rules when working inside an Odex-managed target project.",
 		"- Before exiting any session in an Odex-managed target project, automatically create any missing context you judge should exist for future work.",
-		"- In an Odex-managed target project, do not ask the user for permission to create or update context files when they are needed. Use best judgment and create them automatically.",
+		"- In an Odex-managed target project, do not ask the user for permission or confirmation before creating or updating context files when they are needed. Use best judgment and create them automatically.",
 	];
 }
 
