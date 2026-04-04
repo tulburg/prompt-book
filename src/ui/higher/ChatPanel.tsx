@@ -350,22 +350,14 @@ export function ChatPanel({
 
   React.useEffect(() => {
     const preferredModelId = initialModelId ?? activeSession?.modelId ?? selectedModel?.id ?? null;
+    // When an explicit initial model is requested (agent windows), don't fall
+    // back to the first available model – wait for the preferred one to appear
+    // in availableModels (it may need settings/API keys to load first).
     const nextSelectedModel =
       (preferredModelId
         ? availableModels.find((model) => model.id === preferredModelId)
         : null) ??
-      availableModels[0] ??
-      null;
-
-    if (isAgent) {
-      console.log("[ChatPanel:agent] model sync:", {
-        initialModelId,
-        preferredModelId,
-        availableCount: availableModels.length,
-        nextSelectedModel: nextSelectedModel?.id,
-        currentSelected: selectedModel?.id,
-      });
-    }
+      (initialModelId ? null : availableModels[0] ?? null);
 
     if (
       nextSelectedModel &&
@@ -475,7 +467,6 @@ export function ChatPanel({
           | { openAgent: (prompt: string, modelId?: string) => Promise<unknown> }
           | undefined;
         if (bridge) {
-          console.log("[ChatPanel] openAgent modelId:", selectedModel?.id);
           void bridge.openAgent(commandArg, selectedModel?.id);
         }
         return;
@@ -697,10 +688,10 @@ export function ChatPanel({
       {/* Agent header (minimal) */}
       {isAgent && (
         <div
-          className="flex h-[38px] shrink-0 items-center justify-between border-b border-border-500 px-3"
+          className="relative flex h-[38px] shrink-0 items-center justify-end border-b border-border-500 px-3"
           style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
         >
-          <div className="flex items-center gap-1.5">
+          <div className="absolute inset-0 flex items-center justify-center gap-1.5 pointer-events-none">
             <Bot className="h-3.5 w-3.5 text-foreground-900" />
             <span className="text-xs font-semibold text-foreground">Agent</span>
           </div>
