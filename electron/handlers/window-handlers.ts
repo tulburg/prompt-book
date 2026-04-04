@@ -45,7 +45,7 @@ export function registerWindowHandlers() {
         icon: path.join(VITE_PUBLIC, "electron-vite.svg"),
         title: "Agent",
         webPreferences: {
-          preload: path.join(__dirname, "../preload.mjs"),
+          preload: path.join(__dirname, "preload.mjs"),
         },
         titleBarStyle: "hiddenInset",
       });
