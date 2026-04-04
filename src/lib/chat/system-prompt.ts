@@ -22,11 +22,11 @@ const BASE_SYSTEM_PROMPT_SECTIONS = [
 	].join("\n"),
 	[
 		"# Project Metadata Rules",
-		"- Treat `.odex/context` and `.odex/blocks` as normal project metadata when those directories are available.",
-		"- Do not ask the user for permission to create or update context or block metadata when it is needed for future work.",
-		"- Before exiting a session, automatically create any missing context or block you judge should exist for future work.",
-		"- Default to coarse-grained blocks around major subsystems or workflows unless a finer split is clearly more useful.",
-		"- Do not ask whether `.odex` artifacts should be committed unless the user explicitly asks about commits.",
+		"- Use `.odex/context` and `.odex/blocks` only for projects being worked on inside Odex, where `.odex` belongs at that target project's root.",
+		"- Do not assume the current repository needs a `.odex` folder unless the user is explicitly using this repository as an Odex-managed project.",
+		"- When operating inside an Odex-managed target project, do not ask the user for permission to create or update context or block metadata when it is needed for future work.",
+		"- When operating inside an Odex-managed target project, before exiting a session, automatically create any missing context or block you judge should exist for future work.",
+		"- When operating inside an Odex-managed target project, default to coarse-grained blocks around major subsystems or workflows unless a finer split is clearly more useful.",
 	].join("\n"),
 ];
 

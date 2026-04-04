@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatSessionStore } from "@/lib/chat/session-store";
 
@@ -43,5 +43,87 @@ describe("chat session store", () => {
 		expect(restored?.todos).toEqual([
 			{ id: "todo-1", content: "Verify parity", status: "in_progress" },
 		]);
+	});
+
+	it("sorts closed sessions with the latest first", () => {
+		const nowSpy = vi.spyOn(Date, "now");
+		nowSpy.mockReturnValueOnce(1000);
+		const store = new ChatSessionStore();
+		nowSpy.mockReturnValueOnce(1001);
+		const first = store.createSession("First", "model-1");
+		nowSpy.mockReturnValueOnce(1002);
+		const second = store.createSession("Second", "model-1");
+
+		nowSpy.mockReturnValueOnce(2000);
+		store.closeSession(first.id);
+		nowSpy.mockReturnValueOnce(3000);
+		store.closeSession(second.id);
+
+		expect(store.getClosedSnapshots().map((session) => session.id)).toEqual([
+			second.id,
+			first.id,
+		]);
+	});
+
+	it("surfaces archived isolated sessions in history after they merge into storage", () => {
+		const mainStore = new ChatSessionStore();
+		const mainSession = mainStore.createSession("Main", "model-1");
+
+		const isolatedStore = new ChatSessionStore();
+		isolatedStore.setIsolated(true);
+		const agentSession = isolatedStore.createSession("Archived Agent", "model-2", {
+			windowKind: "agent",
+			model: {
+				id: "model-2",
+				displayName: "Agent Model",
+				provider: "openai",
+			},
+		});
+		isolatedStore.archiveAndMerge(agentSession.id);
+
+		expect(mainStore.getOpenSnapshots().map((session) => session.id)).toEqual([
+			mainSession.id,
+		]);
+		expect(mainStore.getClosedSnapshots()).toEqual([
+			expect.objectContaining({
+				id: agentSession.id,
+				windowKind: "agent",
+				model: expect.objectContaining({
+					id: "model-2",
+					displayName: "Agent Model",
+					provider: "openai",
+				}),
+			}),
+		]);
+	});
+
+	it("can take a closed agent session out of history before reopening it", () => {
+		const isolatedStore = new ChatSessionStore();
+		isolatedStore.setIsolated(true);
+		const agentSession = isolatedStore.createSession("Archived Agent", "model-2", {
+			windowKind: "agent",
+			model: {
+				id: "model-2",
+				displayName: "Agent Model",
+				provider: "openai",
+			},
+		});
+		isolatedStore.archiveAndMerge(agentSession.id);
+
+		const mainStore = new ChatSessionStore();
+		const taken = mainStore.takeClosedSession(agentSession.id);
+
+		expect(taken).toEqual(
+			expect.objectContaining({
+				id: agentSession.id,
+				windowKind: "agent",
+				model: expect.objectContaining({
+					id: "model-2",
+					displayName: "Agent Model",
+					provider: "openai",
+				}),
+			}),
+		);
+		expect(mainStore.getClosedSnapshots()).toEqual([]);
 	});
 });

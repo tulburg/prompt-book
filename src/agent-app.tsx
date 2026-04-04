@@ -1,12 +1,14 @@
 import { ChatPanel } from "@/ui";
 import type { ApplicationSettings } from "@/lib/application-settings";
 import type { ChatModelInfo } from "@/lib/chat/chat-models";
+import type { ChatSession } from "@/lib/chat-service";
 import * as React from "react";
 
 type AgentLaunchContext = {
   prompt: string;
   model?: ChatModelInfo | null;
   settings?: ApplicationSettings | null;
+  session?: ChatSession | null;
 };
 
 /**
@@ -31,16 +33,16 @@ export default function AgentApp() {
         : undefined,
     [queryModelId, initialModelProvider, initialModelName],
   );
-  const [launchContext, setLaunchContext] = React.useState<{
-    isReady: boolean;
-    prompt: string;
-    model?: ChatModelInfo | null;
-    settings?: ApplicationSettings | null;
-  }>(() => ({
+  const [launchContext, setLaunchContext] = React.useState<
+    AgentLaunchContext & {
+      isReady: boolean;
+    }
+  >(() => ({
     isReady: !window.windowBridge?.getAgentLaunchContext,
     prompt: queryPrompt,
     model: queryModel,
     settings: null,
+    session: null,
   }));
 
   React.useEffect(() => {
@@ -65,6 +67,7 @@ export default function AgentApp() {
           prompt: context?.prompt ?? queryPrompt,
           model: context?.model ?? queryModel,
           settings: context?.settings ?? null,
+          session: context?.session ?? null,
         });
       })
       .catch(() => {
@@ -78,7 +81,7 @@ export default function AgentApp() {
   }, [queryModel, queryPrompt]);
 
   const initialPrompt = launchContext.prompt;
-  const initialModel = launchContext.model ?? undefined;
+  const initialModel = launchContext.session?.model ?? launchContext.model ?? undefined;
   const initialModelId = initialModel?.id ?? queryModelId;
 
   const handleClose = () => {
@@ -96,6 +99,7 @@ export default function AgentApp() {
         initialPrompt={initialPrompt}
         initialModelId={initialModelId}
         initialModel={initialModel}
+        initialSession={launchContext.session}
         initialSettings={launchContext.settings}
         onClose={handleClose}
         className="h-full rounded-none border-none"

@@ -13,8 +13,9 @@ describe("system prompt", () => {
 		expect(prompt.join("\n")).toContain("# Mode: Ask");
 		expect(prompt[0]).toContain("# Identity");
 		expect(prompt.join("\n")).toContain("# Project Metadata Rules");
-		expect(prompt.join("\n")).toContain("automatically create any missing context or block");
-		expect(prompt.join("\n")).toContain("Default to coarse-grained blocks around major subsystems or workflows");
+		expect(prompt.join("\n")).toContain("Do not assume the current repository needs a `.odex` folder");
+		expect(prompt.join("\n")).toContain("When operating inside an Odex-managed target project");
+		expect(prompt.join("\n")).toContain("default to coarse-grained blocks around major subsystems or workflows");
 	});
 
 	it("lets an override replace the default prompt stack", () => {

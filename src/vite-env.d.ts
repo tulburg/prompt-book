@@ -4,6 +4,7 @@ import type { NativeContextMenuBridge } from "@/lib/native-context-menu";
 import type { DownloadedModelArtifact, PullProgressEvent } from "@/lib/model-downloads";
 import type { ApplicationSettings, SettingsBridge } from "@/lib/application-settings";
 import type { ChatModelInfo } from "@/lib/chat/chat-models";
+import type { ChatSession } from "@/lib/chat-service";
 import type { ProjectBridge } from "@/lib/project-files";
 
 declare global {
@@ -32,11 +33,13 @@ declare global {
 				prompt: string,
 				model?: ChatModelInfo | null,
 				settings?: ApplicationSettings | null,
+				session?: ChatSession | null,
 			) => Promise<unknown>;
 			getAgentLaunchContext: () => Promise<{
 				prompt: string;
 				model?: ChatModelInfo | null;
 				settings?: ApplicationSettings | null;
+				session?: ChatSession | null;
 			} | null>;
 		};
 		llamaBridge?: {

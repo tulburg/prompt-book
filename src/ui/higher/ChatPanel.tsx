@@ -54,6 +54,17 @@ import {
 } from "lucide-react";
 import * as React from "react";
 
+const SCROLL_BOTTOM_THRESHOLD_PX = 96;
+
+function isScrolledNearBottom(
+  element: HTMLDivElement,
+  threshold = SCROLL_BOTTOM_THRESHOLD_PX,
+): boolean {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
+  );
+}
+
 interface ChatPanelProps {
   className?: string;
   onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
@@ -67,6 +78,8 @@ interface ChatPanelProps {
   initialModelId?: string;
   /** Full model metadata to preserve agent provider selection */
   initialModel?: ChatModelInfo | null;
+  /** Optional existing agent session to reopen in an agent window */
+  initialSession?: ChatSession | null;
   /** Optional settings snapshot passed from the launching window */
   initialSettings?: ApplicationSettings | null;
 }
@@ -125,6 +138,7 @@ export function ChatPanel({
   initialPrompt,
   initialModelId,
   initialModel,
+  initialSession,
   initialSettings,
 }: ChatPanelProps) {
   const isAgent = variant === "agent";
@@ -156,7 +170,7 @@ export function ChatPanel({
     LlamaInstalledModelInfo[]
   >([]);
   const [selectedModel, setSelectedModel] = React.useState<ChatModelInfo | null>(
-    variant === "agent" ? initialModel ?? null : null,
+    variant === "agent" ? initialSession?.model ?? initialModel ?? null : null,
   );
   const [serverStatus, setServerStatus] = React.useState<
     "stopped" | "starting" | "running" | "error"
@@ -188,6 +202,8 @@ export function ChatPanel({
   const [slashMenuOpen, setSlashMenuOpen] = React.useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0);
   const [slashFilter, setSlashFilter] = React.useState("");
+  const [showScrollToBottom, setShowScrollToBottom] = React.useState(false);
+  const messagesScrollRef = React.useRef<HTMLDivElement>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = React.useRef<HTMLDivElement>(null);
@@ -195,6 +211,7 @@ export function ChatPanel({
   const modeButtonRef = React.useRef<HTMLButtonElement>(null);
   const modelButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
+  const shouldAutoScrollRef = React.useRef(true);
   const historyRef = React.useRef<HTMLDivElement>(null);
   const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
   const slashCommands = React.useMemo(
@@ -371,14 +388,38 @@ export function ChatPanel({
     // with the main window's localStorage-backed sessions.
     if (isAgent) {
       chatService.setIsolated(true);
-      if (initialModel) {
-        chatService.currentModel = initialModel;
+      const importedSession = initialSession
+        ? chatService.importSession(initialSession)
+        : null;
+      if (initialSession?.model ?? initialModel) {
+        chatService.currentModel = initialSession?.model ?? initialModel ?? null;
       }
+
+      const session =
+        importedSession ??
+        chatService.createSession(
+          "Agent",
+          initialSession?.modelId ?? initialModel?.id ?? initialModelId,
+        );
+      activeSessionIdRef.current = session.id;
+      setActiveSession(session);
+      setSessions([...chatService.sessions]);
+      setChatMode(session.mode);
+      return () => {
+        unsubStatus();
+        unsubRecover();
+        unsubSession();
+        unsubStream();
+        unsubPull();
+        llamaServerService.stopHeartbeat();
+        for (const timeoutId of downloadDismissTimersRef.current.values()) {
+          window.clearTimeout(timeoutId);
+        }
+        downloadDismissTimersRef.current.clear();
+      };
     }
 
-    const session = isAgent
-      ? chatService.createSession("Agent", initialModel?.id ?? initialModelId)
-      : chatService.ensureSession();
+    const session = chatService.ensureSession();
     activeSessionIdRef.current = session.id;
     setActiveSession(session);
     setSessions([...chatService.sessions]);
@@ -415,6 +456,7 @@ export function ChatPanel({
   React.useEffect(() => {
     if (!isAgent || initialModelAppliedRef.current) return;
     const model =
+      initialSession?.model ??
       initialModel ??
       (initialModelId
         ? availableModels.find((candidate) => candidate.id === initialModelId) ??
@@ -424,7 +466,7 @@ export function ChatPanel({
     initialModelAppliedRef.current = true;
     setSelectedModel(model);
     chatService.currentModel = model;
-  }, [isAgent, initialModel, initialModelId, availableModels]);
+  }, [isAgent, initialSession, initialModel, initialModelId, availableModels]);
 
   // Agent variant: auto-send once the initial model is ready.
   React.useEffect(() => {
@@ -529,9 +571,59 @@ export function ChatPanel({
     };
   }, [selectedModel?.id, selectedModel?.provider, serverStatus]);
 
+  const scrollMessagesToBottom = React.useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      const marker = messagesEndRef.current;
+      if (marker) {
+        marker.scrollIntoView({ behavior, block: "end" });
+      } else if (messagesScrollRef.current) {
+        messagesScrollRef.current.scrollTop =
+          messagesScrollRef.current.scrollHeight;
+      }
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+    },
+    [],
+  );
+
+  const handleMessagesScroll = React.useCallback(() => {
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    const shouldAutoScroll = isScrolledNearBottom(container);
+    shouldAutoScrollRef.current = shouldAutoScroll;
+    setShowScrollToBottom(!shouldAutoScroll);
+  }, []);
+
   React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.messages, streamingText, isStreaming]);
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    const rafId = window.requestAnimationFrame(() => {
+      scrollMessagesToBottom("auto");
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [activeSession?.id, scrollMessagesToBottom]);
+
+  React.useLayoutEffect(() => {
+    if (!activeSession) return;
+    if (!shouldAutoScrollRef.current) {
+      setShowScrollToBottom(true);
+      return;
+    }
+    const rafId = window.requestAnimationFrame(() => {
+      scrollMessagesToBottom(isStreaming ? "auto" : "smooth");
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [
+    activeSession,
+    activeSession?.messages,
+    isStreaming,
+    scrollMessagesToBottom,
+    streamingText,
+  ]);
 
   React.useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
@@ -965,6 +1057,33 @@ export function ChatPanel({
                       <button
                         className="flex w-full cursor-pointer flex-col gap-0.5 border-none bg-transparent px-3 py-2 text-left hover:bg-border-500"
                         onClick={() => {
+                          if (session.windowKind === "agent") {
+                            const bridge = (window as unknown as Record<string, unknown>)
+                              .windowBridge as
+                              | {
+                                  openAgent: (
+                                    prompt: string,
+                                    model?: ChatModelInfo | null,
+                                    settings?: ApplicationSettings | null,
+                                    session?: ChatSession | null,
+                                  ) => Promise<unknown>;
+                                }
+                              | undefined;
+                            if (!bridge) {
+                              return;
+                            }
+                            const restoredAgentSession =
+                              chatService.takeHistorySession(session.id) ?? session;
+                            setShowHistory(false);
+                            void bridge.openAgent(
+                              "",
+                              restoredAgentSession.model ?? null,
+                              effectiveSettings,
+                              restoredAgentSession,
+                            );
+                            return;
+                          }
+
                           chatService.restoreSession(session.id);
                           activeSessionIdRef.current = session.id;
                           setActiveSession(chatService.activeSession);
@@ -1250,7 +1369,11 @@ export function ChatPanel({
       </div>
 
       {/* Messages area */}
-      <div className="order-1 min-h-0 flex-1 overflow-y-auto text-foreground">
+      <div
+        ref={messagesScrollRef}
+        onScroll={handleMessagesScroll}
+        className="relative order-1 min-h-0 flex-1 overflow-y-auto text-foreground"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
             {(!selectedModel || isLocalChatModel(selectedModel)) &&
@@ -1296,77 +1419,92 @@ export function ChatPanel({
             )}
           </div>
         ) : (
-          <div className="mx-auto flex max-w-[950px] flex-col">
-            {messages.map((msg, idx) => {
-              if (
-                msg.subtype === "tool_result" &&
-                toolMessagePairing.pairedResultIds.has(msg.id)
-              ) {
-                return null;
-              }
-
-              const isToolMsg =
-                msg.subtype === "tool_use" || msg.subtype === "tool_result";
-
-              const nextVisible = messages
-                .slice(idx + 1)
-                .find(
-                  (m) =>
-                    !(
-                      m.subtype === "tool_result" &&
-                      toolMessagePairing.pairedResultIds.has(m.id)
-                    ),
-                );
-              const isLastInTurn =
-                !nextVisible || nextVisible.role === "user";
-              let isLastToolInRun = false;
-              if (isToolMsg) {
-                const nextIsAlsoTool =
-                  nextVisible?.subtype === "tool_use" ||
-                  nextVisible?.subtype === "tool_result";
-                isLastToolInRun = !nextIsAlsoTool && isLastInTurn;
-              }
-
-              if (msg.subtype === "tool_use") {
-                const pairedResult =
-                  toolMessagePairing.pairedResultByToolUseId.get(msg.id);
-                if (pairedResult) {
-                  return (
-                    <ChatMessageItem
-                      key={msg.id}
-                      message={msg}
-                      onOpenFileAtLine={onOpenFileAtLine}
-                      pairedResult={pairedResult}
-                      isLastTool={isLastToolInRun && !isStreaming}
-                      isLast={isLastInTurn && !isStreaming}
-                    />
-                  );
+          <>
+            <div className="mx-auto flex max-w-[950px] flex-col">
+              {messages.map((msg, idx) => {
+                if (
+                  msg.subtype === "tool_result" &&
+                  toolMessagePairing.pairedResultIds.has(msg.id)
+                ) {
+                  return null;
                 }
-              }
-              return (
+
+                const isToolMsg =
+                  msg.subtype === "tool_use" || msg.subtype === "tool_result";
+
+                const nextVisible = messages
+                  .slice(idx + 1)
+                  .find(
+                    (m) =>
+                      !(
+                        m.subtype === "tool_result" &&
+                        toolMessagePairing.pairedResultIds.has(m.id)
+                      ),
+                  );
+                const isLastInTurn =
+                  !nextVisible || nextVisible.role === "user";
+                let isLastToolInRun = false;
+                if (isToolMsg) {
+                  const nextIsAlsoTool =
+                    nextVisible?.subtype === "tool_use" ||
+                    nextVisible?.subtype === "tool_result";
+                  isLastToolInRun = !nextIsAlsoTool && isLastInTurn;
+                }
+
+                if (msg.subtype === "tool_use") {
+                  const pairedResult =
+                    toolMessagePairing.pairedResultByToolUseId.get(msg.id);
+                  if (pairedResult) {
+                    return (
+                      <ChatMessageItem
+                        key={msg.id}
+                        message={msg}
+                        onOpenFileAtLine={onOpenFileAtLine}
+                        pairedResult={pairedResult}
+                        isLastTool={isLastToolInRun && !isStreaming}
+                        isLast={isLastInTurn && !isStreaming}
+                      />
+                    );
+                  }
+                }
+                return (
+                  <ChatMessageItem
+                    key={msg.id}
+                    message={msg}
+                    onOpenFileAtLine={onOpenFileAtLine}
+                    isLastTool={isLastToolInRun && !isStreaming}
+                    isLast={isLastInTurn && !isStreaming}
+                  />
+                );
+              })}
+              {isStreaming && (
                 <ChatMessageItem
-                  key={msg.id}
-                  message={msg}
-                  onOpenFileAtLine={onOpenFileAtLine}
-                  isLastTool={isLastToolInRun && !isStreaming}
-                  isLast={isLastInTurn && !isStreaming}
+                  message={{
+                    id: "streaming-preview",
+                    role: "assistant",
+                    content: visibleStreamingText ?? "",
+                    timestamp: Date.now(),
+                    isStreaming: true,
+                    subtype: "message",
+                  }}
                 />
-              );
-            })}
-            {isStreaming && (
-              <ChatMessageItem
-                message={{
-                  id: "streaming-preview",
-                  role: "assistant",
-                  content: visibleStreamingText ?? "",
-                  timestamp: Date.now(),
-                  isStreaming: true,
-                  subtype: "message",
-                }}
-              />
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+            {showScrollToBottom && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+                <button
+                  type="button"
+                  className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-border-500 bg-panel-600 px-3 py-1.5 text-xs text-foreground shadow-[0_6px_18px_rgba(0,0,0,0.28)] transition-colors hover:bg-panel-500"
+                  onClick={() => scrollMessagesToBottom("smooth")}
+                  aria-label="Scroll to latest message"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  <span>Latest</span>
+                </button>
+              </div>
             )}
-            <div ref={messagesEndRef} />
-          </div>
+          </>
         )}
       </div>
 

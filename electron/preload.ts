@@ -1,6 +1,7 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type { ApplicationSettings } from '../src/lib/application-settings'
 import type { ChatModelInfo } from '../src/lib/chat/chat-models'
+import type { ChatSession } from '../src/lib/chat-service'
 import type { PullProgressEvent } from '../src/lib/model-downloads'
 import type { NativeContextMenuRequest } from '../src/lib/native-context-menu'
 
@@ -76,7 +77,8 @@ contextBridge.exposeInMainWorld("windowBridge", {
     prompt: string,
     model?: ChatModelInfo | null,
     settings?: ApplicationSettings | null,
-  ) => ipcRenderer.invoke("window:open-agent", { prompt, model, settings }),
+    session?: ChatSession | null,
+  ) => ipcRenderer.invoke("window:open-agent", { prompt, model, settings, session }),
   getAgentLaunchContext: () => ipcRenderer.invoke("window:get-agent-launch-context"),
 })
 

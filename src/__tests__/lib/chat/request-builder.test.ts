@@ -287,12 +287,13 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("Listing context is the first thing to do before any executions");
 		expect(request.system.join("\n")).toContain("From the provided context list, you must load at least 1 context");
 		expect(request.system.join("\n")).toContain("update at least 1 affected block");
+		expect(request.system.join("\n")).toContain("Apply these context rules when working inside an Odex-managed target project");
 		expect(request.system.join("\n")).toContain("automatically create any missing context");
 		expect(request.system.join("\n")).toContain("automatically create any missing block");
-		expect(request.system.join("\n")).toContain("Do not ask the user for permission to create or update context files");
+		expect(request.system.join("\n")).toContain("do not ask the user for permission to create or update context files");
 		expect(request.system.join("\n")).toContain("Default to coarse-grained blocks around major subsystems or workflows");
-		expect(request.system.join("\n")).toContain("Do not ask the user for permission or granularity preferences");
-		expect(request.system.join("\n")).toContain("Do not ask whether they should be committed");
+		expect(request.system.join("\n")).toContain("do not ask the user for permission or granularity preferences");
+		expect(request.system.join("\n")).toContain("not automatically in the current repository");
 		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 

@@ -3,7 +3,7 @@ import type {
 	NativeToolDefinition,
 	JsonObject,
 } from "./tools/tool-types";
-import type { ChatModelProvider } from "./chat-models";
+import type { ChatModelInfo, ChatModelProvider } from "./chat-models";
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
@@ -66,6 +66,8 @@ export interface ChatSessionState {
 	title: string;
 	mode: ChatMode;
 	modelId: string | null;
+	model?: ChatModelInfo | null;
+	windowKind?: "main" | "agent";
 	createdAt: number;
 	bootstrappedAt: number;
 	closedAt: number | null;

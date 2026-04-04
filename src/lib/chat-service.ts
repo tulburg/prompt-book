@@ -18,7 +18,10 @@ import type {
 	ChatUiEvent,
 } from "./chat/types";
 import type { ApplicationSettings } from "./application-settings";
-import { llamaServerService } from "./server-service";
+import {
+	type LlamaInstalledModelInfo,
+	llamaServerService,
+} from "./server-service";
 
 type Listener<T> = (value: T) => void;
 
@@ -130,6 +133,7 @@ export class ChatService {
 	private _stopRequested = false;
 	private _streamingSessionId: string | null = null;
 	private _isSending = false;
+	private _windowKind: "main" | "agent" = "main";
 	private _queuedMessages: Array<{
 		content: string;
 		options?: {
@@ -165,7 +169,7 @@ export class ChatService {
 		this._currentModel = model;
 		const active = this.activeSession;
 		if (!active) return;
-		const updated = this.store.setSessionModel(active.id, model?.id ?? null);
+		const updated = this.store.setSessionModel(active.id, model);
 		if (updated) {
 			this._onDidUpdateSession.fire(updated);
 		}
@@ -175,13 +179,22 @@ export class ChatService {
 		const session = this.store.createSession(
 			title,
 			modelId ?? this._currentModel?.id ?? null,
+			{
+				model: this._currentModel,
+				windowKind: this._windowKind,
+			},
 		);
 		this._onDidUpdateSession.fire(session);
 		return session;
 	}
 
 	ensureSession(): ChatSession {
-		const session = this.store.ensureSession(this._currentModel?.id ?? null);
+		const session =
+			this.activeSession ??
+			this.store.createSession("New Chat", this._currentModel?.id ?? null, {
+				model: this._currentModel,
+				windowKind: this._windowKind,
+			});
 		this._onDidUpdateSession.fire(session);
 		return session;
 	}
@@ -200,24 +213,43 @@ export class ChatService {
 		}
 	}
 
+	takeHistorySession(sessionId: string): ChatSession | null {
+		const session = this.store.takeClosedSession(sessionId);
+		if (session) {
+			this._onDidUpdateSession.fire(this.activeSession ?? session);
+		}
+		return session;
+	}
+
 	closeSession(sessionId: string): void {
 		if (this._streamingSessionId === sessionId) {
 			this.stopGeneration();
 		}
 		const session =
 			this.store.closeSession(sessionId) ??
-			this.store.createSession("New Chat", this._currentModel?.id ?? null);
+			this.store.createSession("New Chat", this._currentModel?.id ?? null, {
+				model: this._currentModel,
+				windowKind: this._windowKind,
+			});
 		this._onDidUpdateSession.fire(session);
 	}
 
 	/** Put the session store in isolated mode (no localStorage persistence). */
 	setIsolated(isolated: boolean): void {
 		this.store.setIsolated(isolated);
+		this._windowKind = isolated ? "agent" : "main";
 	}
 
 	/** Archive a session and merge it into persisted storage (for agent windows). */
 	archiveSessionToStorage(sessionId: string): void {
 		this.store.archiveAndMerge(sessionId);
+	}
+
+	importSession(session: ChatSession): ChatSession {
+		const imported = this.store.importSession(session);
+		this._currentModel = session.model ?? this._currentModel;
+		this._onDidUpdateSession.fire(imported);
+		return imported;
 	}
 
 	setMode(mode: ChatMode): void {
@@ -442,7 +474,13 @@ export class ChatService {
 					event: { type: "tool_executing" },
 				});
 
-				console.log(`[ChatService] Executing ${assistantToolCalls.length} tool call(s) (iteration ${iteration + 1}):`, assistantToolCalls.map((c) => `${c.name}(${JSON.stringify(c.input).slice(0, 100)})`));
+				console.log(
+					`[ChatService] Executing ${assistantToolCalls.length} tool call(s) (iteration ${iteration + 1}):`,
+					assistantToolCalls.map((c) => ({
+						name: c.name,
+						input: c.input,
+					})),
+				);
 				const executed = await executeToolCalls(
 					assistantToolCalls,
 					toolContext,

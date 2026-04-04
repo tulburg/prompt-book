@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ApplicationSettings } from "../../src/lib/application-settings";
 import type { ChatModelInfo } from "../../src/lib/chat/chat-models";
+import type { ChatSession } from "../../src/lib/chat-service";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname, "../..");
@@ -16,6 +17,7 @@ type AgentLaunchPayload = {
   prompt: string;
   model?: ChatModelInfo | null;
   settings?: ApplicationSettings | null;
+  session?: ChatSession | null;
 };
 
 const agentLaunchPayloads = new Map<number, AgentLaunchPayload>();
@@ -37,6 +39,7 @@ export function registerWindowHandlers() {
         prompt: string;
         model?: ChatModelInfo | null;
         settings?: ApplicationSettings | null;
+        session?: ChatSession | null;
       },
     ) => {
       const agentWin = new BrowserWindow({
@@ -52,8 +55,9 @@ export function registerWindowHandlers() {
 
       agentLaunchPayloads.set(agentWin.id, {
         prompt: payload.prompt,
-        model: payload.model ?? null,
+        model: payload.session?.model ?? payload.model ?? null,
         settings: payload.settings ?? null,
+        session: payload.session ?? null,
       });
       agentWin.on("closed", () => {
         agentLaunchPayloads.delete(agentWin.id);
@@ -61,8 +65,9 @@ export function registerWindowHandlers() {
 
       // Load the same app but with a query param so the renderer knows it's an agent window
       const prompt = encodeURIComponent(payload.prompt);
-      const modelParams = payload.model
-        ? `&modelId=${encodeURIComponent(payload.model.id)}&modelProvider=${encodeURIComponent(payload.model.provider)}&modelName=${encodeURIComponent(payload.model.displayName)}`
+      const model = payload.session?.model ?? payload.model;
+      const modelParams = model
+        ? `&modelId=${encodeURIComponent(model.id)}&modelProvider=${encodeURIComponent(model.provider)}&modelName=${encodeURIComponent(model.displayName)}`
         : "";
       if (VITE_DEV_SERVER_URL) {
         await agentWin.loadURL(
@@ -73,11 +78,11 @@ export function registerWindowHandlers() {
           query: {
             agent: "1",
             prompt: payload.prompt,
-            ...(payload.model
+            ...(model
               ? {
-                  modelId: payload.model.id,
-                  modelProvider: payload.model.provider,
-                  modelName: payload.model.displayName,
+                  modelId: model.id,
+                  modelProvider: model.provider,
+                  modelName: model.displayName,
                 }
               : {}),
           },

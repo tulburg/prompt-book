@@ -417,4 +417,29 @@ describe("tool runtime", () => {
 		);
 		expect(files.get("/workspace/.odex/blocks/chat-tools/diagram.mmd")).toContain("Tool Runtime");
 	});
+
+	it("creates a new block and linked context when none exist yet", async () => {
+		const files = new Map<string, string>();
+		const context = await makeContext(files);
+
+		const written = await context.writeBlock({
+			blockId: "app-frontend-ui",
+			title: "Frontend UI",
+			definition: "Renderer UI built with React and Vite.",
+			files: [
+				"/workspace/src/main.tsx",
+				"/workspace/src/app.tsx",
+			],
+			contextParagraph: "Created the initial frontend UI block for future maintenance.",
+		});
+
+		expect(written.action).toBe("created");
+		expect(written.schemaPath).toBe("/workspace/.odex/blocks/app-frontend-ui/block.json");
+		expect(written.contextPath).toBe("/workspace/.odex/context/app-frontend-ui.md");
+		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/block.json")).toContain("Frontend UI");
+		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/diagram.mmd")).toContain("flowchart TD");
+		expect(files.get("/workspace/.odex/context/app-frontend-ui.md")).toContain(
+			"Created the initial frontend UI block for future maintenance.",
+		);
+	});
 });
