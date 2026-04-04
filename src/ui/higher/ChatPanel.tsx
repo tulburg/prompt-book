@@ -39,6 +39,7 @@ import { Modal } from "@/ui/lower/Modal";
 import { TinyScrollArea } from "@/ui/lower/TinyScrollArea";
 import {
   AlertCircle,
+  Bot,
   ChevronDown,
   Clock,
   Download,
@@ -101,6 +102,9 @@ export function ChatPanel({
     top: number;
     left: number;
   } | null>(null);
+  const [slashMenuOpen, setSlashMenuOpen] = React.useState(false);
+  const [slashMenuIndex, setSlashMenuIndex] = React.useState(0);
+  const [slashFilter, setSlashFilter] = React.useState("");
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = React.useRef<HTMLDivElement>(null);
@@ -110,6 +114,23 @@ export function ChatPanel({
   const activeSessionIdRef = React.useRef<string | null>(null);
   const historyRef = React.useRef<HTMLDivElement>(null);
   const downloadDismissTimersRef = React.useRef<Map<string, number>>(new Map());
+  const slashCommands = React.useMemo(
+    () => [
+      {
+        name: "agent",
+        description: "Launch an agent in a new window",
+        icon: Bot,
+      },
+    ],
+    [],
+  );
+
+  const filteredSlashCommands = React.useMemo(() => {
+    if (!slashFilter) return slashCommands;
+    const lower = slashFilter.toLowerCase();
+    return slashCommands.filter((cmd) => cmd.name.startsWith(lower));
+  }, [slashCommands, slashFilter]);
+
   const hasGoogleGeminiConfigured = Boolean(
     settings?.["chat.providers.google.apiKey"].trim(),
   );
@@ -383,6 +404,28 @@ export function ChatPanel({
     const trimmed = inputValue.trim();
     if (!trimmed || isStreaming) return;
 
+    // Handle slash commands
+    const slashMatch = trimmed.match(/^\/(\w+)\s*([\s\S]*)$/);
+    if (slashMatch) {
+      const command = slashMatch[1].toLowerCase();
+      const commandArg = slashMatch[2]?.trim() ?? "";
+
+      if (command === "agent") {
+        setInputValue("");
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+        }
+        const bridge = (window as unknown as Record<string, unknown>)
+          .windowBridge as
+          | { openAgent: (prompt: string) => Promise<unknown> }
+          | undefined;
+        if (bridge) {
+          void bridge.openAgent(commandArg);
+        }
+        return;
+      }
+    }
+
     setInputValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -395,7 +438,44 @@ export function ChatPanel({
     chatService.stopGeneration();
   };
 
+  const handleSelectSlashCommand = React.useCallback(
+    (cmd: (typeof slashCommands)[number]) => {
+      setInputValue(`/${cmd.name} `);
+      setSlashMenuOpen(false);
+      textareaRef.current?.focus();
+    },
+    [slashCommands],
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash command menu navigation
+    if (slashMenuOpen && filteredSlashCommands.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashMenuIndex((prev) =>
+          prev < filteredSlashCommands.length - 1 ? prev + 1 : 0,
+        );
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashMenuIndex((prev) =>
+          prev > 0 ? prev - 1 : filteredSlashCommands.length - 1,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        handleSelectSlashCommand(filteredSlashCommands[slashMenuIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuOpen(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -403,10 +483,21 @@ export function ChatPanel({
   };
 
   const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
+    const value = e.target.value;
+    setInputValue(value);
     const textarea = e.target;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+
+    // Slash command detection: show menu when input starts with "/"
+    const slashMatch = value.match(/^\/(\w*)$/);
+    if (slashMatch) {
+      setSlashFilter(slashMatch[1]);
+      setSlashMenuOpen(true);
+      setSlashMenuIndex(0);
+    } else {
+      setSlashMenuOpen(false);
+    }
   };
 
   // Close history popup on click outside
@@ -651,6 +742,36 @@ export function ChatPanel({
       {/* Input area at bottom */}
       <div className="order-2 flex shrink-0 flex-col gap-1 border-t border-border-500 px-3 py-2">
         <div className="relative box-border w-full cursor-text rounded-[10px] border border-border-500 bg-panel-600 px-1.5 pb-1.5 focus-within:border-sky">
+          {/* Slash command autocomplete menu */}
+          {slashMenuOpen && filteredSlashCommands.length > 0 && (
+            <div className="absolute bottom-full left-0 z-[1000] mb-1 w-full min-w-[200px] overflow-hidden rounded-lg border border-border-500 bg-panel-600 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
+              <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-placeholder">
+                Commands
+              </div>
+              {filteredSlashCommands.map((cmd, idx) => {
+                const Icon = cmd.icon;
+                return (
+                  <button
+                    key={cmd.name}
+                    className={`flex w-full cursor-pointer items-center gap-2.5 border-none bg-transparent px-2.5 py-2 text-left text-xs text-foreground transition-colors hover:bg-border-500 ${idx === slashMenuIndex ? "bg-border-500" : ""}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // prevent blur
+                      handleSelectSlashCommand(cmd);
+                    }}
+                    onMouseEnter={() => setSlashMenuIndex(idx)}
+                  >
+                    <Icon className="h-4 w-4 shrink-0 text-foreground-900" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium">/{cmd.name}</span>
+                      <span className="text-[11px] text-foreground-900">
+                        {cmd.description}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             className="w-full min-h-[60px] max-h-[200px] resize-none border-none bg-transparent px-1.5 pt-2.5 pb-1 text-[13px] font-[inherit] leading-relaxed text-foreground outline-none placeholder:text-placeholder"

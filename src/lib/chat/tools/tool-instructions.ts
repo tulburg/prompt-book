@@ -7,6 +7,21 @@ function formatToolList(tools: ChatToolDefinition[]): string[] {
 	});
 }
 
+function buildContextPolicyLines(tools: ChatToolDefinition[]): string[] {
+	const hasContextTool = tools.some((tool) => tool.name === "Context");
+	if (!hasContextTool) {
+		return [];
+	}
+
+	return [
+		"- CRITICAL: Listing context is the first thing to do before any executions. Call `Context` with `action: \"list\"` before proceeding.",
+		"- CRITICAL: From the provided context list, you must load at least 1 context with `Context` and `action: \"read\"` before proceeding.",
+		"- If the list is empty or no existing context fits the current change, create one with `Context` and `action: \"write\"`, including a markdown filename like `codebase.md`, a title, a description, and a paragraph, then read it before continuing.",
+		"- After every major change, add a paragraph record for future use with `Context` and `action: \"write\"`.",
+		"- When a major change changes the scope of a context, update that context's title and description in the same `Context` write call.",
+	];
+}
+
 export function buildToolInstructionSections(
 	tools: ChatToolDefinition[],
 	options?: {
@@ -45,6 +60,7 @@ export function buildToolInstructionSections(
 		"- Prefer read/search tools before write tools unless the required change is already certain.",
 		"- When a tool fails, explain the failure and adjust rather than repeating the same invalid call.",
 	);
+	lines.push(...buildContextPolicyLines(tools));
 
 	return [
 		lines.join("\n"),

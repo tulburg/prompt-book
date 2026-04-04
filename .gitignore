@@ -30,3 +30,5 @@ release
 
 .sources/*
 *.tsbuildinfo
+
+.claude/worktrees/*

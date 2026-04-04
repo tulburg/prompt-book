@@ -53,6 +53,15 @@ export const CANONICAL_TOOL_INVENTORY: CanonicalToolInventoryEntry[] = [
 		status: "stubbed",
 	},
 	{
+		name: "Context",
+		sourceOfTruth: "claude",
+		category: "filesystem",
+		uiKind: "file_list",
+		claudeImplementation: "src/lib/chat/tools/builtin/context-tool.ts",
+		status: "implemented",
+		notes: "Persists reusable project context in .odex/context with list, read, and write actions.",
+	},
+	{
 		name: "Edit",
 		sourceOfTruth: "claude",
 		category: "filesystem",

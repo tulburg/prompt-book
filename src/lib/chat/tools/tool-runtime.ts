@@ -603,6 +603,60 @@ export function createToolContext(options: {
 				};
 			},
 			searchWeb,
+			async listContexts() {
+				const result = await window.ipcRenderer.invoke("chat-tools:context-list", {
+					workspaceRoots,
+				}) as {
+					items?: Array<{
+						filename: string;
+						title: string;
+						description: string;
+						path: string;
+						updatedAt: number;
+					}>;
+				};
+				return result.items ?? [];
+			},
+			async readContext(filename) {
+				const result = await window.ipcRenderer.invoke("chat-tools:context-read", {
+					filename,
+					workspaceRoots,
+				}) as {
+					filename?: string;
+					title?: string;
+					description?: string;
+					path?: string;
+					content?: string;
+				};
+				return {
+					filename: result.filename ?? filename,
+					title: result.title ?? filename,
+					description: result.description ?? "",
+					path: result.path ?? filename,
+					content: result.content ?? "",
+				};
+			},
+			async writeContext(input) {
+				const result = await window.ipcRenderer.invoke("chat-tools:context-write", {
+					...input,
+					workspaceRoots,
+				}) as {
+					filename?: string;
+					title?: string;
+					description?: string;
+					path?: string;
+					content?: string;
+					action?: "created" | "updated";
+				};
+				return {
+					filename: result.filename ?? input.filename,
+					title: result.title ?? input.title ?? input.filename,
+					description: result.description ?? input.description ?? "",
+					path: result.path ?? input.filename,
+					content: result.content ?? "",
+					action: result.action ?? "updated",
+				};
+			},
 			listTools() {
 				return getAvailableChatTools(context).map((tool) => ({
 					name: tool.name,

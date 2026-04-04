@@ -1,6 +1,7 @@
 import { CANONICAL_TOOL_INVENTORY } from "./canonical-inventory";
 import { unsupportedAdvancedTools } from "./builtin/advanced-tools";
 import { bashTool } from "./builtin/bash-tool";
+import { contextTool } from "./builtin/context-tool";
 import { editTool } from "./builtin/edit-tool";
 import { globTool } from "./builtin/glob-tool";
 import { grepTool } from "./builtin/grep-tool";
@@ -29,6 +30,7 @@ import {
 import type { ChatToolContext, ChatToolDefinition, NativeToolDefinition } from "./tool-types";
 
 const ALL_TOOLS: ChatToolDefinition[] = [
+	contextTool,
 	readTool,
 	writeTool,
 	editTool,

@@ -1,8 +1,15 @@
 import { ipcMain } from "electron";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, createWriteStream } from "node:fs";
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import {
+	normalizeContextFilename,
+	parseContextMarkdown,
+	serializeContextMarkdown,
+} from "../../src/lib/chat/tools/context-format";
 
 function execFileAsync(
 	command: string,
@@ -194,6 +201,29 @@ function getBackgroundTaskDir(): string {
 	return dir;
 }
 
+function getContextDir(workspaceRoots: string[]): string {
+	const workspaceRoot = workspaceRoots[0];
+	if (!workspaceRoot) {
+		throw new Error("Context tool requires an open workspace.");
+	}
+	return path.join(workspaceRoot, ".odex", "context");
+}
+
+async function readExistingContextFile(
+	filePath: string,
+	filename: string,
+): Promise<ReturnType<typeof parseContextMarkdown> | null> {
+	try {
+		const content = await fs.readFile(filePath, "utf8");
+		return parseContextMarkdown(filename, content);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return null;
+		}
+		throw error;
+	}
+}
+
 function createTaskId(): string {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -382,6 +412,121 @@ export function registerChatToolHandlers() {
 			throw new Error(stderr || String(error));
 		}
 	});
+
+	ipcMain.handle(
+		"chat-tools:context-list",
+		async (_event, payload: { workspaceRoots?: string[] }) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const contextDir = getContextDir(workspaceRoots);
+			let entries;
+			try {
+				entries = await fs.readdir(contextDir, { withFileTypes: true });
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+					return { items: [] };
+				}
+				throw error;
+			}
+
+			const files = await Promise.all(
+				entries
+					.filter((entry) => entry.isFile() && /\.md$/i.test(entry.name))
+					.map(async (entry) => {
+						const filePath = path.join(contextDir, entry.name);
+						const [stats, content] = await Promise.all([
+							fs.stat(filePath),
+							fs.readFile(filePath, "utf8"),
+						]);
+						const parsed = parseContextMarkdown(entry.name, content);
+						return {
+							filename: entry.name,
+							title: parsed.title,
+							description: parsed.description,
+							path: filePath,
+							updatedAt: stats.mtimeMs,
+						};
+					}),
+			);
+
+			files.sort((left, right) => right.updatedAt - left.updatedAt);
+			return { items: files };
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:context-read",
+		async (_event, payload: { filename?: string; workspaceRoots?: string[] }) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const filename = normalizeContextFilename(payload.filename ?? "");
+			const filePath = path.join(getContextDir(workspaceRoots), filename);
+			const content = await fs.readFile(filePath, "utf8");
+			const parsed = parseContextMarkdown(filename, content);
+			return {
+				filename,
+				title: parsed.title,
+				description: parsed.description,
+				path: filePath,
+				content: parsed.content,
+			};
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:context-write",
+		async (
+			_event,
+			payload: {
+				filename?: string;
+				title?: string;
+				description?: string;
+				paragraph?: string;
+				workspaceRoots?: string[];
+			},
+		) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const filename = normalizeContextFilename(payload.filename ?? "");
+			const paragraph = typeof payload.paragraph === "string" ? payload.paragraph.trim() : "";
+			if (!paragraph) {
+				throw new Error("Context writes require a non-empty paragraph.");
+			}
+
+			const contextDir = getContextDir(workspaceRoots);
+			const filePath = path.join(contextDir, filename);
+			const existing = await readExistingContextFile(filePath, filename);
+			const nextTitle = typeof payload.title === "string" && payload.title.trim()
+				? payload.title.trim()
+				: existing?.title ?? "";
+			const nextDescription =
+				typeof payload.description === "string" && payload.description.trim()
+					? payload.description.trim()
+					: existing?.description ?? "";
+
+			if (!nextTitle) {
+				throw new Error("Creating a new context requires a title.");
+			}
+			if (!nextDescription) {
+				throw new Error("Creating a new context requires a description.");
+			}
+
+			await fs.mkdir(contextDir, { recursive: true });
+			const timestampedParagraph = `[${new Date().toISOString()}] ${paragraph}`;
+			const content = serializeContextMarkdown({
+				title: nextTitle,
+				description: nextDescription,
+				paragraphs: [...(existing?.paragraphs ?? []), timestampedParagraph],
+			});
+			await fs.writeFile(filePath, content, "utf8");
+
+			return {
+				filename,
+				title: nextTitle,
+				description: nextDescription,
+				path: filePath,
+				content,
+				action: existing ? "updated" : "created",
+			};
+		},
+	);
 
 	ipcMain.handle(
 		"chat-tools:run-command",

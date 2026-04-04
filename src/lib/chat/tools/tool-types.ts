@@ -277,6 +277,35 @@ export interface ChatToolContext {
 		allowedDomains?: string[];
 		blockedDomains?: string[];
 	}) => Promise<Array<{ title: string; url: string; snippet: string }>>;
+	listContexts: () => Promise<
+		Array<{
+			filename: string;
+			title: string;
+			description: string;
+			path: string;
+			updatedAt: number;
+		}>
+	>;
+	readContext: (filename: string) => Promise<{
+		filename: string;
+		title: string;
+		description: string;
+		path: string;
+		content: string;
+	}>;
+	writeContext: (input: {
+		filename: string;
+		title?: string;
+		description?: string;
+		paragraph: string;
+	}) => Promise<{
+		filename: string;
+		title: string;
+		description: string;
+		path: string;
+		content: string;
+		action: "created" | "updated";
+	}>;
 	listTools: () => Array<{
 		name: string;
 		aliases?: string[];

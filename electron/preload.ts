@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld("nativeContextMenu", {
     ipcRenderer.invoke("ui:show-native-context-menu", request),
 })
 
+contextBridge.exposeInMainWorld("windowBridge", {
+  openAgent: (prompt: string) =>
+    ipcRenderer.invoke("window:open-agent", { prompt }),
+})
+
 contextBridge.exposeInMainWorld("llamaBridge", {
   isBinaryInstalled: () => ipcRenderer.invoke("llama:is-binary-installed"),
   downloadBinary: () => ipcRenderer.invoke("llama:download-binary"),

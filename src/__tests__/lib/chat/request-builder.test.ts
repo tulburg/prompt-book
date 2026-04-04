@@ -42,6 +42,22 @@ const fakeToolContext: ChatToolContext = {
 		result: "",
 	}),
 	searchWeb: async () => [],
+	listContexts: async () => [],
+	readContext: async (filename) => ({
+		filename,
+		title: "Codebase",
+		description: "Workspace context",
+		path: `/workspace/.odex/context/${filename}`,
+		content: "# Codebase",
+	}),
+	writeContext: async (input) => ({
+		filename: input.filename,
+		title: input.title ?? "Codebase",
+		description: input.description ?? "Workspace context",
+		path: `/workspace/.odex/context/${input.filename}`,
+		content: "# Codebase",
+		action: "updated",
+	}),
 	listTools: () => [],
 	getTodos: () => [],
 	setTodos: (items) => items,
@@ -248,6 +264,8 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("CRITICAL: When not using native structured tool calls");
 		expect(request.system.join("\n")).toContain('{"tool":"<tool_name>","arguments":{"<argument_name>":"<argument_value>"}}');
 		expect(request.system.join("\n")).toContain("When you emit thinking or reasoning");
+		expect(request.system.join("\n")).toContain("Listing context is the first thing to do before any executions");
+		expect(request.system.join("\n")).toContain("From the provided context list, you must load at least 1 context");
 		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 

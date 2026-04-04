@@ -5,6 +5,7 @@ import { registerGitHandlers } from "./git-handlers";
 import { registerUiHandlers } from "./ui-handlers";
 import { registerLlamaHandlers } from "./handlers";
 import { registerChatToolHandlers } from "./chat-tools-handlers";
+import { registerWindowHandlers } from "./window-handlers";
 
 export { ensureLlamaServerStarted } from "./handlers";
 export { killLlamaServer } from "./handlers";
@@ -17,4 +18,5 @@ export function registerAllHandlers(win: BrowserWindow | null) {
   registerChatToolHandlers();
   registerUiHandlers(win);
   registerLlamaHandlers();
+  registerWindowHandlers();
 }
