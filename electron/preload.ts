@@ -1,5 +1,6 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type { ApplicationSettings } from '../src/lib/application-settings'
+import type { ChatModelInfo } from '../src/lib/chat/chat-models'
 import type { PullProgressEvent } from '../src/lib/model-downloads'
 import type { NativeContextMenuRequest } from '../src/lib/native-context-menu'
 
@@ -71,8 +72,8 @@ contextBridge.exposeInMainWorld("nativeContextMenu", {
 
 contextBridge.exposeInMainWorld("windowBridge", {
   openMermaidViewer: () => ipcRenderer.invoke("window:open-mermaid"),
-  openAgent: (prompt: string, modelId?: string) =>
-    ipcRenderer.invoke("window:open-agent", { prompt, modelId }),
+  openAgent: (prompt: string, model?: ChatModelInfo | null) =>
+    ipcRenderer.invoke("window:open-agent", { prompt, model }),
 })
 
 contextBridge.exposeInMainWorld("llamaBridge", {

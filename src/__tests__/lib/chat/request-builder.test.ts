@@ -58,6 +58,26 @@ const fakeToolContext: ChatToolContext = {
 		content: "# Codebase",
 		action: "updated",
 	}),
+	listBlocks: async () => [],
+	readBlock: async (blockId) => ({
+		id: blockId,
+		title: "Chat Tools",
+		definition: "Chat tool architecture",
+		schemaPath: `/workspace/.odex/blocks/${blockId}/block.json`,
+		diagramPath: `/workspace/.odex/blocks/${blockId}/diagram.mmd`,
+		contextPath: `/workspace/.odex/context/${blockId}.md`,
+		files: [],
+	}),
+	writeBlock: async (input) => ({
+		id: input.blockId,
+		title: input.title ?? "Chat Tools",
+		definition: input.definition ?? "Chat tool architecture",
+		schemaPath: `/workspace/.odex/blocks/${input.blockId}/block.json`,
+		diagramPath: `/workspace/.odex/blocks/${input.blockId}/diagram.mmd`,
+		contextPath: `/workspace/.odex/context/${input.blockId}.md`,
+		files: input.files ?? [],
+		action: "updated",
+	}),
 	listTools: () => [],
 	getTodos: () => [],
 	setTodos: (items) => items,
@@ -266,6 +286,13 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("When you emit thinking or reasoning");
 		expect(request.system.join("\n")).toContain("Listing context is the first thing to do before any executions");
 		expect(request.system.join("\n")).toContain("From the provided context list, you must load at least 1 context");
+		expect(request.system.join("\n")).toContain("update at least 1 affected block");
+		expect(request.system.join("\n")).toContain("automatically create any missing context");
+		expect(request.system.join("\n")).toContain("automatically create any missing block");
+		expect(request.system.join("\n")).toContain("Do not ask the user for permission to create or update context files");
+		expect(request.system.join("\n")).toContain("Default to coarse-grained blocks around major subsystems or workflows");
+		expect(request.system.join("\n")).toContain("Do not ask the user for permission or granularity preferences");
+		expect(request.system.join("\n")).toContain("Do not ask whether they should be committed");
 		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 

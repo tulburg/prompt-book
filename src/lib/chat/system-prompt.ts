@@ -20,6 +20,14 @@ const BASE_SYSTEM_PROMPT_SECTIONS = [
 		"- Conversation history is authoritative user and assistant transcript.",
 		"- Runtime reminders may be injected into outbound requests without being stored as visible messages.",
 	].join("\n"),
+	[
+		"# Project Metadata Rules",
+		"- Treat `.odex/context` and `.odex/blocks` as normal project metadata when those directories are available.",
+		"- Do not ask the user for permission to create or update context or block metadata when it is needed for future work.",
+		"- Before exiting a session, automatically create any missing context or block you judge should exist for future work.",
+		"- Default to coarse-grained blocks around major subsystems or workflows unless a finer split is clearly more useful.",
+		"- Do not ask whether `.odex` artifacts should be committed unless the user explicitly asks about commits.",
+	].join("\n"),
 ];
 
 const MODE_PROMPTS: Record<ChatMode, string> = {

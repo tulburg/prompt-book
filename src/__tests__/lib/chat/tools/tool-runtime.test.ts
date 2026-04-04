@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+	parseBlockSchema,
+	serializeBlockSchema,
+} from "@/lib/chat/tools/block-format";
+import {
 	parseContextMarkdown,
 	serializeContextMarkdown,
 } from "@/lib/chat/tools/context-format";
@@ -120,6 +124,105 @@ function installWindowStubs(files: FileMap) {
 						description: nextDescription,
 						path: filePath,
 						content,
+						action: existing ? "updated" : "created",
+					};
+				}
+				if (channel === "chat-tools:block-list") {
+					const items = [...files.entries()]
+						.filter(([filePath]) => filePath.endsWith("/block.json"))
+						.map(([filePath, content]) => {
+							const blockId = filePath.split("/").slice(-2, -1)[0] ?? "unknown";
+							const parsed = parseBlockSchema(blockId, filePath, content);
+							return {
+								id: parsed.id,
+								title: parsed.title,
+								definition: parsed.definition,
+								schemaPath: parsed.schemaPath,
+								diagramPath: parsed.diagramPath,
+								contextPath: parsed.contextPath,
+								files: parsed.files,
+								updatedAt: 1,
+							};
+						});
+					return { items };
+				}
+				if (channel === "chat-tools:block-read") {
+					const blockId = String(payload?.blockId ?? "");
+					const filePath = `/workspace/.odex/blocks/${blockId}/block.json`;
+					const content = files.get(filePath);
+					if (content === undefined) {
+						throw new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+					}
+					return parseBlockSchema(blockId, filePath, content);
+				}
+				if (channel === "chat-tools:block-write") {
+					const blockId = String(payload?.blockId ?? "");
+					const blockDir = `/workspace/.odex/blocks/${blockId}`;
+					const schemaPath = `${blockDir}/block.json`;
+					const existing = files.get(schemaPath);
+					const parsed = existing ? parseBlockSchema(blockId, schemaPath, existing) : null;
+					const title = typeof payload?.title === "string" && payload.title.trim()
+						? payload.title.trim()
+						: parsed?.title ?? "";
+					const definition = typeof payload?.definition === "string" && payload.definition.trim()
+						? payload.definition.trim()
+						: parsed?.definition ?? "";
+					const blockFiles = Array.isArray(payload?.files)
+						? payload.files.filter((value): value is string => typeof value === "string")
+						: parsed?.files ?? [];
+					const diagramPath = `${blockDir}/${typeof payload?.diagramFilename === "string" && payload.diagramFilename.trim() ? payload.diagramFilename.trim() : "diagram.mmd"}`;
+					const contextFilename =
+						typeof payload?.contextFilename === "string" && payload.contextFilename.trim()
+							? payload.contextFilename.trim()
+							: `${blockId}.md`;
+					const contextPath = `/workspace/.odex/context/${contextFilename}`;
+					const contextContent = files.get(contextPath);
+					const parsedContext = contextContent ? parseContextMarkdown(contextFilename, contextContent) : null;
+					const nextContextTitle =
+						typeof payload?.contextTitle === "string" && payload.contextTitle.trim()
+							? payload.contextTitle.trim()
+							: parsedContext?.title || title;
+					const nextContextDescription =
+						typeof payload?.contextDescription === "string" && payload.contextDescription.trim()
+							? payload.contextDescription.trim()
+							: parsedContext?.description || definition;
+					const contextParagraph = String(payload?.contextParagraph ?? "").trim();
+					if (!title || !definition || !contextParagraph) {
+						throw new Error("Missing block metadata.");
+					}
+					files.set(
+						contextPath,
+						serializeContextMarkdown({
+							title: nextContextTitle,
+							description: nextContextDescription,
+							paragraphs: [
+								...(parsedContext?.paragraphs ?? []),
+								`[2026-04-04T00:00:00.000Z] ${contextParagraph}`,
+							],
+						}),
+					);
+					files.set(
+						diagramPath,
+						String(payload?.diagramContent ?? "flowchart TD\n    Block[\"Chat Tools\"]\n").trimEnd() + "\n",
+					);
+					files.set(
+						schemaPath,
+						serializeBlockSchema({
+							title,
+							definition,
+							files: blockFiles,
+							diagramPath,
+							contextPath,
+						}),
+					);
+					return {
+						id: blockId,
+						title,
+						definition,
+						schemaPath,
+						diagramPath,
+						contextPath,
+						files: blockFiles,
 						action: existing ? "updated" : "created",
 					};
 				}
@@ -259,5 +362,59 @@ describe("tool runtime", () => {
 		expect(files.get("/workspace/.odex/context/codebase.md")).toContain(
 			"Added a persistent Context tool backed by .odex/context.",
 		);
+	});
+
+	it("lists, reads, and writes stored blocks", async () => {
+		const files = new Map<string, string>([
+			[
+				"/workspace/.odex/blocks/chat-tools/block.json",
+				serializeBlockSchema({
+					title: "Chat Tools",
+					definition: "The chat tool runtime and instruction layer.",
+					files: ["/workspace/src/lib/chat/tools/tool-registry.ts"],
+					diagramPath: "/workspace/.odex/blocks/chat-tools/diagram.mmd",
+					contextPath: "/workspace/.odex/context/chat-tools.md",
+				}),
+			],
+			[
+				"/workspace/.odex/blocks/chat-tools/diagram.mmd",
+				'flowchart TD\n    Block["Chat Tools"]\n',
+			],
+			[
+				"/workspace/.odex/context/chat-tools.md",
+				serializeContextMarkdown({
+					title: "Chat Tools Context",
+					description: "Context for the chat tools block.",
+					paragraphs: ["[2026-04-03T00:00:00.000Z] Initial block context."],
+				}),
+			],
+		]);
+		const context = await makeContext(files);
+
+		const listed = await context.listBlocks();
+		expect(listed).toHaveLength(1);
+		expect(listed[0]?.id).toBe("chat-tools");
+		expect(listed[0]?.files).toContain("/workspace/src/lib/chat/tools/tool-registry.ts");
+
+		const read = await context.readBlock("chat-tools");
+		expect(read.title).toBe("Chat Tools");
+		expect(read.diagramPath).toBe("/workspace/.odex/blocks/chat-tools/diagram.mmd");
+
+		const written = await context.writeBlock({
+			blockId: "chat-tools",
+			definition: "The chat tool runtime, context tool, and block tool layer.",
+			files: [
+				"/workspace/src/lib/chat/tools/tool-registry.ts",
+				"/workspace/src/lib/chat/tools/builtin/block-tool.ts",
+			],
+			contextParagraph: "Added block persistence and block-level model instructions.",
+			diagramContent: 'flowchart TD\n    Block["Chat Tools"]\n    Runtime["Tool Runtime"]\n    Block --> Runtime',
+		});
+		expect(written.action).toBe("updated");
+		expect(written.files).toContain("/workspace/src/lib/chat/tools/builtin/block-tool.ts");
+		expect(files.get("/workspace/.odex/context/chat-tools.md")).toContain(
+			"Added block persistence and block-level model instructions.",
+		);
+		expect(files.get("/workspace/.odex/blocks/chat-tools/diagram.mmd")).toContain("Tool Runtime");
 	});
 });

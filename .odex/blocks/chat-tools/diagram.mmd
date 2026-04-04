@@ -1,0 +1,17 @@
+flowchart TD
+    Block["Chat Tools"]
+    Registry["Tool Registry"]
+    Runtime["Tool Runtime"]
+    Instructions["Instruction Builder"]
+    Handlers["Electron IPC Handlers"]
+    Context["Context Metadata"]
+    BlockMeta["Block Metadata"]
+
+    Block --> Registry
+    Block --> Runtime
+    Block --> Instructions
+    Block --> Handlers
+    Runtime --> Context
+    Runtime --> BlockMeta
+    Handlers --> Context
+    Handlers --> BlockMeta

@@ -64,6 +64,27 @@ interface ChatPanelProps {
   initialPrompt?: string;
   /** Model ID to use for the agent session */
   initialModelId?: string;
+  /** Full model metadata to preserve agent provider selection */
+  initialModel?: ChatModelInfo | null;
+}
+
+function sameModel(
+  left: ChatModelInfo | null | undefined,
+  right: ChatModelInfo | null | undefined,
+): boolean {
+  return !!left && !!right && left.id === right.id && left.provider === right.provider;
+}
+
+function findMatchingModel(
+  models: ChatModelInfo[],
+  target: ChatModelInfo | null | undefined,
+): ChatModelInfo | null {
+  if (!target) return null;
+  return (
+    models.find((model) => sameModel(model, target)) ??
+    models.find((model) => model.id === target.id) ??
+    null
+  );
 }
 
 export function ChatPanel({
@@ -73,9 +94,10 @@ export function ChatPanel({
   onClose,
   initialPrompt,
   initialModelId,
+  initialModel,
 }: ChatPanelProps) {
   const isAgent = variant === "agent";
-  const { settings } = useApplicationSettings();
+  const { isBootstrapping, settings } = useApplicationSettings();
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
     null,
@@ -86,7 +108,7 @@ export function ChatPanel({
     LlamaInstalledModelInfo[]
   >([]);
   const [selectedModel, setSelectedModel] = React.useState<ChatModelInfo | null>(
-    null,
+    variant === "agent" ? initialModel ?? null : null,
   );
   const [serverStatus, setServerStatus] = React.useState<
     "stopped" | "starting" | "running" | "error"
@@ -300,10 +322,13 @@ export function ChatPanel({
     // with the main window's localStorage-backed sessions.
     if (isAgent) {
       chatService.setIsolated(true);
+      if (initialModel) {
+        chatService.currentModel = initialModel;
+      }
     }
 
     const session = isAgent
-      ? chatService.createSession("Agent", initialModelId)
+      ? chatService.createSession("Agent", initialModel?.id ?? initialModelId)
       : chatService.ensureSession();
     activeSessionIdRef.current = session.id;
     setActiveSession(session);
@@ -337,55 +362,69 @@ export function ChatPanel({
     };
   }, [isAgent]);
 
-  // Agent variant: wait for the requested model to appear, set it, then send
+  // Agent variant: apply the requested model as soon as we can resolve it.
   React.useEffect(() => {
-    if (!isAgent || !initialModelId || initialModelAppliedRef.current) return;
-    const model = availableModels.find((m) => m.id === initialModelId);
+    if (!isAgent || initialModelAppliedRef.current) return;
+    const model =
+      initialModel ??
+      (initialModelId
+        ? availableModels.find((candidate) => candidate.id === initialModelId) ??
+          null
+        : null);
     if (!model) return;
     initialModelAppliedRef.current = true;
     setSelectedModel(model);
     chatService.currentModel = model;
-    if (
-      initialPrompt?.trim() &&
-      !sentInitialPromptRef.current &&
-      activeSession
-    ) {
-      sentInitialPromptRef.current = true;
-      chatService.setActiveSession(activeSession.id);
-      void chatService.sendMessage(initialPrompt.trim(), {
-        mode: "Agent",
-        settings,
-      });
-    }
-  }, [isAgent, initialModelId, availableModels, activeSession, initialPrompt, settings]);
+  }, [isAgent, initialModel, initialModelId, availableModels]);
 
-  // Agent variant (no initialModelId): auto-send once any model is ready
+  // Agent variant: auto-send once the initial model is ready.
   React.useEffect(() => {
-    if (!isAgent || initialModelId) return;
     if (!initialPrompt?.trim() || sentInitialPromptRef.current) return;
-    if (!activeSession || !selectedModel) return;
+    if (!isAgent) return;
+    if (!activeSession) return;
+    const modelForInitialSend = initialModel ?? selectedModel;
+    if (!modelForInitialSend) return;
+    if (initialModelId && modelForInitialSend.id !== initialModelId) return;
+    if (!isLocalChatModel(modelForInitialSend) && (isBootstrapping || !settings)) {
+      return;
+    }
     sentInitialPromptRef.current = true;
     chatService.setActiveSession(activeSession.id);
+    chatService.currentModel = modelForInitialSend;
     void chatService.sendMessage(initialPrompt.trim(), {
       mode: "Agent",
       settings,
     });
-  }, [isAgent, initialModelId, initialPrompt, activeSession, selectedModel, settings]);
+  }, [
+    isAgent,
+    initialModel,
+    initialModelId,
+    initialPrompt,
+    activeSession,
+    selectedModel,
+    isBootstrapping,
+    settings,
+  ]);
 
   React.useEffect(() => {
-    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
+    const preferredModelId =
+      activeSession?.modelId ?? selectedModel?.id ?? initialModel?.id ?? null;
+    const preferredModel =
+      (selectedModel?.id === preferredModelId ? selectedModel : null) ??
+      (initialModel?.id === preferredModelId ? initialModel : null);
+    const matchingModel =
+      preferredModel != null
+        ? findMatchingModel(availableModels, preferredModel)
+        : preferredModelId
+          ? availableModels.find((model) => model.id === preferredModelId) ?? null
+          : null;
     const nextSelectedModel =
-      (preferredModelId
-        ? availableModels.find((model) => model.id === preferredModelId)
-        : null) ??
+      matchingModel ??
+      (preferredModelId ? preferredModel : null) ??
       availableModels[0] ??
       null;
 
-    if (
-      nextSelectedModel &&
-      nextSelectedModel.id === selectedModel?.id &&
-      nextSelectedModel.provider === selectedModel?.provider
-    ) {
+    if (sameModel(nextSelectedModel, selectedModel)) {
       return;
     }
 
@@ -399,7 +438,7 @@ export function ChatPanel({
 
     setSelectedModel(nextSelectedModel);
     chatService.currentModel = nextSelectedModel;
-  }, [activeSession?.modelId, availableModels, selectedModel]);
+  }, [activeSession?.modelId, availableModels, initialModel, selectedModel]);
 
   React.useEffect(() => {
     if (!selectedModel || !isLocalChatModel(selectedModel)) {
@@ -484,12 +523,18 @@ export function ChatPanel({
         if (textareaRef.current) {
           textareaRef.current.style.height = "auto";
         }
+        const modelForAgentLaunch = selectedModel ?? chatService.currentModel ?? null;
         const bridge = (window as unknown as Record<string, unknown>)
           .windowBridge as
-          | { openAgent: (prompt: string, modelId?: string) => Promise<unknown> }
+          | {
+              openAgent: (
+                prompt: string,
+                model?: ChatModelInfo | null,
+              ) => Promise<unknown>;
+            }
           | undefined;
         if (bridge) {
-          void bridge.openAgent(commandArg, selectedModel?.id);
+          void bridge.openAgent(commandArg, modelForAgentLaunch);
         }
         return;
       }

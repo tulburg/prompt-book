@@ -657,6 +657,71 @@ export function createToolContext(options: {
 					action: result.action ?? "updated",
 				};
 			},
+			async listBlocks() {
+				const result = await window.ipcRenderer.invoke("chat-tools:block-list", {
+					workspaceRoots,
+				}) as {
+					items?: Array<{
+						id: string;
+						title: string;
+						definition: string;
+						schemaPath: string;
+						diagramPath: string;
+						contextPath: string;
+						files: string[];
+						updatedAt: number;
+					}>;
+				};
+				return result.items ?? [];
+			},
+			async readBlock(blockId) {
+				const result = await window.ipcRenderer.invoke("chat-tools:block-read", {
+					blockId,
+					workspaceRoots,
+				}) as {
+					id?: string;
+					title?: string;
+					definition?: string;
+					schemaPath?: string;
+					diagramPath?: string;
+					contextPath?: string;
+					files?: string[];
+				};
+				return {
+					id: result.id ?? blockId,
+					title: result.title ?? blockId,
+					definition: result.definition ?? "",
+					schemaPath: result.schemaPath ?? blockId,
+					diagramPath: result.diagramPath ?? "",
+					contextPath: result.contextPath ?? "",
+					files: result.files ?? [],
+				};
+			},
+			async writeBlock(input) {
+				const result = await window.ipcRenderer.invoke("chat-tools:block-write", {
+					...input,
+					workspaceRoots,
+				}) as {
+					id?: string;
+					title?: string;
+					definition?: string;
+					schemaPath?: string;
+					diagramPath?: string;
+					contextPath?: string;
+					files?: string[];
+					action?: "created" | "updated";
+				};
+				return {
+					id: result.id ?? input.blockId,
+					title: result.title ?? input.title ?? input.blockId,
+					definition: result.definition ?? input.definition ?? "",
+					schemaPath: result.schemaPath ?? input.blockId,
+					diagramPath: result.diagramPath ?? "",
+					contextPath: result.contextPath ?? "",
+					files: result.files ?? input.files ?? [],
+					action: result.action ?? "updated",
+				};
+			},
 			listTools() {
 				return getAvailableChatTools(context).map((tool) => ({
 					name: tool.name,

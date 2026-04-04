@@ -45,6 +45,15 @@ export const CANONICAL_TOOL_INVENTORY: CanonicalToolInventoryEntry[] = [
 		status: "implemented",
 	},
 	{
+		name: "Block",
+		sourceOfTruth: "claude",
+		category: "filesystem",
+		uiKind: "json",
+		claudeImplementation: "src/lib/chat/tools/builtin/block-tool.ts",
+		status: "implemented",
+		notes: "Persists block schemas in .odex/blocks and keeps block diagram and linked context in sync.",
+	},
+	{
 		name: "Config",
 		sourceOfTruth: "claude",
 		category: "workflow",

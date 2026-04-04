@@ -306,6 +306,48 @@ export interface ChatToolContext {
 		content: string;
 		action: "created" | "updated";
 	}>;
+	listBlocks: () => Promise<
+		Array<{
+			id: string;
+			title: string;
+			definition: string;
+			schemaPath: string;
+			diagramPath: string;
+			contextPath: string;
+			files: string[];
+			updatedAt: number;
+		}>
+	>;
+	readBlock: (blockId: string) => Promise<{
+		id: string;
+		title: string;
+		definition: string;
+		schemaPath: string;
+		diagramPath: string;
+		contextPath: string;
+		files: string[];
+	}>;
+	writeBlock: (input: {
+		blockId: string;
+		title?: string;
+		definition?: string;
+		files?: string[];
+		diagramFilename?: string;
+		diagramContent?: string;
+		contextFilename?: string;
+		contextTitle?: string;
+		contextDescription?: string;
+		contextParagraph: string;
+	}) => Promise<{
+		id: string;
+		title: string;
+		definition: string;
+		schemaPath: string;
+		diagramPath: string;
+		contextPath: string;
+		files: string[];
+		action: "created" | "updated";
+	}>;
 	listTools: () => Array<{
 		name: string;
 		aliases?: string[];

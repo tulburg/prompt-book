@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ChatModelInfo } from "../../src/lib/chat/chat-models";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname, "../..");
@@ -13,7 +14,7 @@ const VITE_PUBLIC = VITE_DEV_SERVER_URL
 export function registerWindowHandlers() {
   ipcMain.handle(
     "window:open-agent",
-    async (_event, payload: { prompt: string; modelId?: string }) => {
+    async (_event, payload: { prompt: string; model?: ChatModelInfo | null }) => {
       const agentWin = new BrowserWindow({
         width: 520,
         height: 680,
@@ -27,19 +28,25 @@ export function registerWindowHandlers() {
 
       // Load the same app but with a query param so the renderer knows it's an agent window
       const prompt = encodeURIComponent(payload.prompt);
-      const modelParam = payload.modelId
-        ? `&modelId=${encodeURIComponent(payload.modelId)}`
+      const modelParams = payload.model
+        ? `&modelId=${encodeURIComponent(payload.model.id)}&modelProvider=${encodeURIComponent(payload.model.provider)}&modelName=${encodeURIComponent(payload.model.displayName)}`
         : "";
       if (VITE_DEV_SERVER_URL) {
         await agentWin.loadURL(
-          `${VITE_DEV_SERVER_URL}?agent=1&prompt=${prompt}${modelParam}`,
+          `${VITE_DEV_SERVER_URL}?agent=1&prompt=${prompt}${modelParams}`,
         );
       } else {
         await agentWin.loadFile(path.join(RENDERER_DIST, "index.html"), {
           query: {
             agent: "1",
             prompt: payload.prompt,
-            ...(payload.modelId ? { modelId: payload.modelId } : {}),
+            ...(payload.model
+              ? {
+                  modelId: payload.model.id,
+                  modelProvider: payload.model.provider,
+                  modelName: payload.model.displayName,
+                }
+              : {}),
           },
         });
       }

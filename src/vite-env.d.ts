@@ -3,6 +3,7 @@
 import type { NativeContextMenuBridge } from "@/lib/native-context-menu";
 import type { DownloadedModelArtifact, PullProgressEvent } from "@/lib/model-downloads";
 import type { SettingsBridge } from "@/lib/application-settings";
+import type { ChatModelInfo } from "@/lib/chat/chat-models";
 import type { ProjectBridge } from "@/lib/project-files";
 
 declare global {
@@ -25,6 +26,13 @@ declare global {
 		nativeContextMenu?: NativeContextMenuBridge;
 		projectBridge?: ProjectBridge;
 		settingsBridge?: SettingsBridge;
+		windowBridge?: {
+			openMermaidViewer: () => Promise<unknown>;
+			openAgent: (
+				prompt: string,
+				model?: ChatModelInfo | null,
+			) => Promise<unknown>;
+		};
 		llamaBridge?: {
 			isBinaryInstalled: () => Promise<boolean>;
 			downloadBinary: () => Promise<void>;

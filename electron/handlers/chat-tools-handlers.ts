@@ -6,6 +6,12 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+	defaultBlockDiagram,
+	normalizeBlockId,
+	parseBlockSchema,
+	serializeBlockSchema,
+} from "../../src/lib/chat/tools/block-format";
+import {
 	normalizeContextFilename,
 	parseContextMarkdown,
 	serializeContextMarkdown,
@@ -209,6 +215,14 @@ function getContextDir(workspaceRoots: string[]): string {
 	return path.join(workspaceRoot, ".odex", "context");
 }
 
+function getBlocksDir(workspaceRoots: string[]): string {
+	const workspaceRoot = workspaceRoots[0];
+	if (!workspaceRoot) {
+		throw new Error("Block tool requires an open workspace.");
+	}
+	return path.join(workspaceRoot, ".odex", "blocks");
+}
+
 async function readExistingContextFile(
 	filePath: string,
 	filename: string,
@@ -216,6 +230,21 @@ async function readExistingContextFile(
 	try {
 		const content = await fs.readFile(filePath, "utf8");
 		return parseContextMarkdown(filename, content);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return null;
+		}
+		throw error;
+	}
+}
+
+async function readExistingBlockSchema(
+	schemaPath: string,
+	blockId: string,
+): Promise<ReturnType<typeof parseBlockSchema> | null> {
+	try {
+		const content = await fs.readFile(schemaPath, "utf8");
+		return parseBlockSchema(blockId, schemaPath, content);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
 			return null;
@@ -523,6 +552,186 @@ export function registerChatToolHandlers() {
 				description: nextDescription,
 				path: filePath,
 				content,
+				action: existing ? "updated" : "created",
+			};
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:block-list",
+		async (_event, payload: { workspaceRoots?: string[] }) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const blocksDir = getBlocksDir(workspaceRoots);
+			let entries;
+			try {
+				entries = await fs.readdir(blocksDir, { withFileTypes: true });
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+					return { items: [] };
+				}
+				throw error;
+			}
+
+			const blocks = await Promise.all(
+				entries
+					.filter((entry) => entry.isDirectory())
+					.map(async (entry) => {
+						const blockId = normalizeBlockId(entry.name);
+						const schemaPath = path.join(blocksDir, blockId, "block.json");
+						const parsed = await readExistingBlockSchema(schemaPath, blockId);
+						if (!parsed) {
+							return null;
+						}
+						const stats = await fs.stat(schemaPath);
+						return {
+							id: parsed.id,
+							title: parsed.title,
+							definition: parsed.definition,
+							schemaPath: parsed.schemaPath,
+							diagramPath: parsed.diagramPath,
+							contextPath: parsed.contextPath,
+							files: parsed.files,
+							updatedAt: stats.mtimeMs,
+						};
+					}),
+			);
+
+			return {
+				items: blocks
+					.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+					.sort((left, right) => right.updatedAt - left.updatedAt),
+			};
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:block-read",
+		async (_event, payload: { blockId?: string; workspaceRoots?: string[] }) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const blockId = normalizeBlockId(payload.blockId ?? "");
+			const schemaPath = path.join(getBlocksDir(workspaceRoots), blockId, "block.json");
+			const content = await fs.readFile(schemaPath, "utf8");
+			return parseBlockSchema(blockId, schemaPath, content);
+		},
+	);
+
+	ipcMain.handle(
+		"chat-tools:block-write",
+		async (
+			_event,
+			payload: {
+				blockId?: string;
+				title?: string;
+				definition?: string;
+				files?: string[];
+				diagramFilename?: string;
+				diagramContent?: string;
+				contextFilename?: string;
+				contextTitle?: string;
+				contextDescription?: string;
+				contextParagraph?: string;
+				workspaceRoots?: string[];
+			},
+		) => {
+			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
+			const blockId = normalizeBlockId(payload.blockId ?? "");
+			const blocksDir = getBlocksDir(workspaceRoots);
+			const blockDir = path.join(blocksDir, blockId);
+			const schemaPath = path.join(blockDir, "block.json");
+			const existing = await readExistingBlockSchema(schemaPath, blockId);
+
+			const nextTitle = typeof payload.title === "string" && payload.title.trim()
+				? payload.title.trim()
+				: existing?.title ?? "";
+			const nextDefinition = typeof payload.definition === "string" && payload.definition.trim()
+				? payload.definition.trim()
+				: existing?.definition ?? "";
+			const nextFiles = Array.isArray(payload.files)
+				? [...new Set(payload.files.filter((value): value is string => typeof value === "string").map((value) => path.resolve(value.trim())).filter(Boolean))].sort((left, right) =>
+						left.localeCompare(right),
+					)
+				: existing?.files ?? [];
+			if (!nextTitle) {
+				throw new Error("Block writes require a title.");
+			}
+			if (!nextDefinition) {
+				throw new Error("Block writes require a definition.");
+			}
+
+			const contextDir = getContextDir(workspaceRoots);
+			const nextContextFilename = typeof payload.contextFilename === "string" && payload.contextFilename.trim()
+				? normalizeContextFilename(payload.contextFilename)
+				: existing?.contextPath
+					? path.basename(existing.contextPath)
+					: `${blockId}.md`;
+			const nextContextPath = path.join(contextDir, nextContextFilename);
+			const existingContext = await readExistingContextFile(nextContextPath, nextContextFilename);
+			const contextParagraph =
+				typeof payload.contextParagraph === "string" ? payload.contextParagraph.trim() : "";
+			if (!contextParagraph) {
+				throw new Error("Block writes require a non-empty context paragraph.");
+			}
+			const nextContextTitle = typeof payload.contextTitle === "string" && payload.contextTitle.trim()
+				? payload.contextTitle.trim()
+				: existingContext?.title || nextTitle;
+			const nextContextDescription =
+				typeof payload.contextDescription === "string" && payload.contextDescription.trim()
+					? payload.contextDescription.trim()
+					: existingContext?.description || nextDefinition;
+
+			const diagramFilename = typeof payload.diagramFilename === "string" && payload.diagramFilename.trim()
+				? payload.diagramFilename.trim()
+				: existing?.diagramPath
+					? path.basename(existing.diagramPath)
+					: "diagram.mmd";
+			const diagramPath = path.join(blockDir, diagramFilename);
+			let diagramContent = typeof payload.diagramContent === "string" && payload.diagramContent.trim()
+				? payload.diagramContent.trim()
+				: "";
+			if (!diagramContent) {
+				if (existing?.diagramPath) {
+					try {
+						diagramContent = await fs.readFile(existing.diagramPath, "utf8");
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+							throw error;
+						}
+					}
+				}
+				if (!diagramContent) {
+					diagramContent = defaultBlockDiagram(nextTitle, nextFiles);
+				}
+			}
+
+			await fs.mkdir(blockDir, { recursive: true });
+			await fs.mkdir(contextDir, { recursive: true });
+			await fs.writeFile(diagramPath, `${diagramContent.replace(/\r\n/g, "\n").trim()}\n`, "utf8");
+
+			const timestampedParagraph = `[${new Date().toISOString()}] ${contextParagraph}`;
+			const contextContent = serializeContextMarkdown({
+				title: nextContextTitle,
+				description: nextContextDescription,
+				paragraphs: [...(existingContext?.paragraphs ?? []), timestampedParagraph],
+			});
+			await fs.writeFile(nextContextPath, contextContent, "utf8");
+
+			const schemaContent = serializeBlockSchema({
+				title: nextTitle,
+				definition: nextDefinition,
+				files: nextFiles,
+				diagramPath,
+				contextPath: nextContextPath,
+			});
+			await fs.writeFile(schemaPath, schemaContent, "utf8");
+
+			return {
+				id: blockId,
+				title: nextTitle,
+				definition: nextDefinition,
+				schemaPath,
+				diagramPath,
+				contextPath: nextContextPath,
+				files: nextFiles,
 				action: existing ? "updated" : "created",
 			};
 		},
