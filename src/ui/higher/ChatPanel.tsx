@@ -526,14 +526,23 @@ export function ChatPanel({
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
 
-    // Slash command detection: show menu when input starts with "/"
-    // Match "/word" at the start, allow trailing text for argument (e.g. "/agent fix this bug")
-    const slashMatch = value.match(/^\/(\w*)(?:\s|$)/);
-    if (value === "/" || slashMatch) {
-      setSlashFilter(slashMatch ? slashMatch[1] : "");
-      setSlashMenuOpen(true);
-      setSlashMenuIndex(0);
-    } else if (!value.startsWith("/")) {
+    // Slash command detection: show menu when the word at cursor starts with "/"
+    const cursorPos = e.target.selectionStart ?? value.length;
+    const textUpToCursor = value.slice(0, cursorPos);
+    const slashMatch = textUpToCursor.match(/(?:^|\s)\/(\w*)$/);
+    if (slashMatch) {
+      const filter = slashMatch[1];
+      const lower = filter.toLowerCase();
+      const hasMatches =
+        !filter || slashCommands.some((cmd) => cmd.name.startsWith(lower));
+      if (hasMatches) {
+        setSlashFilter(filter);
+        setSlashMenuOpen(true);
+        setSlashMenuIndex(0);
+      } else {
+        setSlashMenuOpen(false);
+      }
+    } else {
       setSlashMenuOpen(false);
     }
   };
