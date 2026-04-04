@@ -171,10 +171,10 @@ export class ChatService {
 		}
 	}
 
-	createSession(title = "New Chat"): ChatSession {
+	createSession(title = "New Chat", modelId?: string): ChatSession {
 		const session = this.store.createSession(
 			title,
-			this._currentModel?.id ?? null,
+			modelId ?? this._currentModel?.id ?? null,
 		);
 		this._onDidUpdateSession.fire(session);
 		return session;

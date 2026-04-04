@@ -303,7 +303,7 @@ export function ChatPanel({
     }
 
     const session = isAgent
-      ? chatService.createSession("Agent")
+      ? chatService.createSession("Agent", initialModelId)
       : chatService.ensureSession();
     activeSessionIdRef.current = session.id;
     setActiveSession(session);
@@ -349,15 +349,13 @@ export function ChatPanel({
   }, [isAgent, initialPrompt, activeSession, selectedModel, settings]);
 
   React.useEffect(() => {
-    const preferredModelId = initialModelId ?? activeSession?.modelId ?? selectedModel?.id ?? null;
-    // When an explicit initial model is requested (agent windows), don't fall
-    // back to the first available model – wait for the preferred one to appear
-    // in availableModels (it may need settings/API keys to load first).
+    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
     const nextSelectedModel =
       (preferredModelId
         ? availableModels.find((model) => model.id === preferredModelId)
         : null) ??
-      (initialModelId ? null : availableModels[0] ?? null);
+      availableModels[0] ??
+      null;
 
     if (
       nextSelectedModel &&
@@ -377,7 +375,7 @@ export function ChatPanel({
 
     setSelectedModel(nextSelectedModel);
     chatService.currentModel = nextSelectedModel;
-  }, [initialModelId, activeSession?.modelId, availableModels, selectedModel]);
+  }, [activeSession?.modelId, availableModels, selectedModel]);
 
   React.useEffect(() => {
     if (!selectedModel || !isLocalChatModel(selectedModel)) {
