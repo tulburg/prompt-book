@@ -8,6 +8,7 @@ import { ChatPanel } from "@/ui";
 export default function AgentApp() {
   const params = new URLSearchParams(window.location.search);
   const initialPrompt = params.get("prompt") ?? "";
+  const initialModelId = params.get("modelId") ?? undefined;
 
   const handleClose = () => {
     window.close();
@@ -18,6 +19,7 @@ export default function AgentApp() {
       <ChatPanel
         variant="agent"
         initialPrompt={initialPrompt}
+        initialModelId={initialModelId}
         onClose={handleClose}
         className="h-full rounded-none border-none"
       />

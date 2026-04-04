@@ -62,6 +62,8 @@ interface ChatPanelProps {
   onClose?: () => void;
   /** Initial prompt to auto-send (agent variant only) */
   initialPrompt?: string;
+  /** Model ID to use for the agent session */
+  initialModelId?: string;
 }
 
 export function ChatPanel({
@@ -70,6 +72,7 @@ export function ChatPanel({
   variant = "full",
   onClose,
   initialPrompt,
+  initialModelId,
 }: ChatPanelProps) {
   const isAgent = variant === "agent";
   const { settings } = useApplicationSettings();
@@ -293,7 +296,15 @@ export function ChatPanel({
       }
     });
 
-    const session = chatService.ensureSession();
+    // Agent windows use an isolated session store so they don't collide
+    // with the main window's localStorage-backed sessions.
+    if (isAgent) {
+      chatService.setIsolated(true);
+    }
+
+    const session = isAgent
+      ? chatService.createSession("Agent")
+      : chatService.ensureSession();
     activeSessionIdRef.current = session.id;
     setActiveSession(session);
     setSessions([...chatService.sessions]);
@@ -313,14 +324,14 @@ export function ChatPanel({
     };
   }, []);
 
-  // Agent variant: archive session on unmount
+  // Agent variant: archive session to main store on unmount
   const sentInitialPromptRef = React.useRef(false);
   React.useEffect(() => {
     if (!isAgent) return;
     return () => {
       const sid = activeSessionIdRef.current;
       if (sid) {
-        chatService.closeSession(sid);
+        chatService.archiveSessionToStorage(sid);
       }
     };
   }, [isAgent]);
@@ -338,7 +349,7 @@ export function ChatPanel({
   }, [isAgent, initialPrompt, activeSession, selectedModel, settings]);
 
   React.useEffect(() => {
-    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
+    const preferredModelId = initialModelId ?? activeSession?.modelId ?? selectedModel?.id ?? null;
     const nextSelectedModel =
       (preferredModelId
         ? availableModels.find((model) => model.id === preferredModelId)
@@ -451,10 +462,10 @@ export function ChatPanel({
         }
         const bridge = (window as unknown as Record<string, unknown>)
           .windowBridge as
-          | { openAgent: (prompt: string) => Promise<unknown> }
+          | { openAgent: (prompt: string, modelId?: string) => Promise<unknown> }
           | undefined;
         if (bridge) {
-          void bridge.openAgent(commandArg);
+          void bridge.openAgent(commandArg, selectedModel?.id);
         }
         return;
       }

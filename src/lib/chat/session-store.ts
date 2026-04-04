@@ -80,8 +80,46 @@ export class ChatSessionStore {
 		return null;
 	}
 
+	private isolated = false;
+
 	constructor() {
 		this.restore();
+	}
+
+	/**
+	 * Switch to isolated mode: clears in-memory state and disables normal
+	 * persistence.  Used by agent windows so they don't collide with the
+	 * main window's session store in localStorage.
+	 */
+	setIsolated(isolated: boolean): void {
+		this.isolated = isolated;
+		if (isolated) {
+			this.sessions = [];
+			this.activeSessionId = null;
+		}
+	}
+
+	/**
+	 * Archive a session and merge it into the persisted store.
+	 * Reads localStorage fresh to avoid overwriting the main window's data.
+	 */
+	archiveAndMerge(sessionId: string): void {
+		const session = this.sessions.find((s) => s.id === sessionId);
+		if (!session) return;
+		session.closedAt = Date.now();
+
+		const storage = this.getStorage();
+		if (!storage) return;
+		try {
+			const raw = storage.getItem(STORAGE_KEY);
+			const payload: PersistedChatState = raw
+				? (JSON.parse(raw) as PersistedChatState)
+				: { sessions: [], activeSessionId: null, defaultMode: "Agent" };
+			payload.sessions.push({ ...session });
+			storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+		} catch {
+			// best-effort
+		}
 	}
 
 	private getStorage(): Storage | undefined {
@@ -93,6 +131,7 @@ export class ChatSessionStore {
 	}
 
 	private persist(): void {
+		if (this.isolated) return;
 		const storage = this.getStorage();
 		if (!storage) return;
 		const payload: PersistedChatState = {

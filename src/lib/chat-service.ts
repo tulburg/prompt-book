@@ -210,6 +210,16 @@ export class ChatService {
 		this._onDidUpdateSession.fire(session);
 	}
 
+	/** Put the session store in isolated mode (no localStorage persistence). */
+	setIsolated(isolated: boolean): void {
+		this.store.setIsolated(isolated);
+	}
+
+	/** Archive a session and merge it into persisted storage (for agent windows). */
+	archiveSessionToStorage(sessionId: string): void {
+		this.store.archiveAndMerge(sessionId);
+	}
+
 	setMode(mode: ChatMode): void {
 		const active = this.activeSession;
 		if (!active) {

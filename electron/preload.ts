@@ -71,8 +71,8 @@ contextBridge.exposeInMainWorld("nativeContextMenu", {
 
 contextBridge.exposeInMainWorld("windowBridge", {
   openMermaidViewer: () => ipcRenderer.invoke("window:open-mermaid"),
-  openAgent: (prompt: string) =>
-    ipcRenderer.invoke("window:open-agent", { prompt }),
+  openAgent: (prompt: string, modelId?: string) =>
+    ipcRenderer.invoke("window:open-agent", { prompt, modelId }),
 })
 
 contextBridge.exposeInMainWorld("llamaBridge", {
