@@ -133,6 +133,19 @@ export function ChatPanel({
     () => resolveChatSettings(settings, initialSettings),
     [initialSettings, settings],
   );
+  // Debug: log settings state in agent windows
+  React.useEffect(() => {
+    if (!isAgent) return;
+    console.log("[ChatPanel:agent] settings state:", {
+      isBootstrapping,
+      hasSettings: !!settings,
+      hasInitialSettings: !!initialSettings,
+      hasEffectiveSettings: !!effectiveSettings,
+      settingsOpenAiKey: settings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+      initialSettingsOpenAiKey: initialSettings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+      effectiveOpenAiKey: effectiveSettings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+    });
+  }, [isAgent, isBootstrapping, settings, initialSettings, effectiveSettings]);
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
     null,
@@ -428,6 +441,12 @@ export function ChatPanel({
     ) {
       return;
     }
+    console.log("[ChatPanel:agent] initial send settings:", {
+      hasSettings: !!settingsForInitialSend,
+      openAiKeyLength: settingsForInitialSend?.["chat.providers.openai.apiKey"]?.length ?? 0,
+      provider: modelForInitialSend.provider,
+      modelId: modelForInitialSend.id,
+    });
     sentInitialPromptRef.current = true;
     chatService.setActiveSession(activeSession.id);
     chatService.currentModel = modelForInitialSend;
@@ -575,6 +594,10 @@ export function ChatPanel({
             }
           | undefined;
         if (bridge) {
+          console.log("[ChatPanel] /agent launch settings:", {
+            hasEffectiveSettings: !!effectiveSettings,
+            openAiKeyLength: effectiveSettings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+          });
           void bridge.openAgent(
             commandArg,
             modelForAgentLaunch,
@@ -590,6 +613,14 @@ export function ChatPanel({
       textareaRef.current.style.height = "auto";
     }
 
+    if (isAgent) {
+      console.log("[ChatPanel:agent] handleSend settings:", {
+        hasEffectiveSettings: !!effectiveSettings,
+        openAiKeyLength: effectiveSettings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+        provider: selectedModel?.provider,
+        modelId: selectedModel?.id,
+      });
+    }
     await chatService.sendMessage(trimmed, {
       mode: chatMode,
       settings: effectiveSettings,

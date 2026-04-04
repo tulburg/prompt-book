@@ -20,14 +20,17 @@ export default function AgentApp() {
   const queryModelId = params.get("modelId") ?? undefined;
   const initialModelProvider = params.get("modelProvider");
   const initialModelName = params.get("modelName");
-  const queryModel: ChatModelInfo | undefined =
-    queryModelId && initialModelProvider && initialModelName
-      ? {
-          id: queryModelId,
-          provider: initialModelProvider as ChatModelInfo["provider"],
-          displayName: initialModelName,
-        }
-      : undefined;
+  const queryModel = React.useMemo<ChatModelInfo | undefined>(
+    () =>
+      queryModelId && initialModelProvider && initialModelName
+        ? {
+            id: queryModelId,
+            provider: initialModelProvider as ChatModelInfo["provider"],
+            displayName: initialModelName,
+          }
+        : undefined,
+    [queryModelId, initialModelProvider, initialModelName],
+  );
   const [launchContext, setLaunchContext] = React.useState<{
     isReady: boolean;
     prompt: string;
@@ -51,6 +54,12 @@ export default function AgentApp() {
       .getAgentLaunchContext()
       .then((context) => {
         if (cancelled) return;
+        console.log("[AgentApp] launch context received:", {
+          hasContext: !!context,
+          hasSettings: !!context?.settings,
+          hasOpenAiKey: !!context?.settings?.["chat.providers.openai.apiKey"],
+          openAiKeyLength: context?.settings?.["chat.providers.openai.apiKey"]?.length ?? 0,
+        });
         setLaunchContext({
           isReady: true,
           prompt: context?.prompt ?? queryPrompt,
