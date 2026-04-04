@@ -643,9 +643,6 @@ export function registerChatToolHandlers() {
 				diagramFilename?: string;
 				diagramContent?: string;
 				contextFilename?: string;
-				contextTitle?: string;
-				contextDescription?: string;
-				contextBody?: string;
 				workspaceRoots?: string[];
 			},
 		) => {
@@ -681,23 +678,6 @@ export function registerChatToolHandlers() {
 					? path.basename(existing.contextPath)
 					: `${blockId}.md`;
 			const nextContextPath = path.join(contextDir, nextContextFilename);
-			const existingContext =
-				(await readExistingContextFile(nextContextPath, nextContextFilename)) ??
-				(existing?.contextPath && existing.contextPath !== nextContextPath
-					? await readExistingContextFile(existing.contextPath, path.basename(existing.contextPath))
-					: null);
-			const contextBody =
-				typeof payload.contextBody === "string" ? payload.contextBody.trim() : "";
-			if (!contextBody) {
-				throw new Error("Block writes require a non-empty context body.");
-			}
-			const nextContextTitle = typeof payload.contextTitle === "string" && payload.contextTitle.trim()
-				? payload.contextTitle.trim()
-				: existingContext?.title || nextTitle;
-			const nextContextDescription =
-				typeof payload.contextDescription === "string" && payload.contextDescription.trim()
-					? payload.contextDescription.trim()
-					: existingContext?.description || nextDefinition;
 
 			const diagramFilename = typeof payload.diagramFilename === "string" && payload.diagramFilename.trim()
 				? payload.diagramFilename.trim()
@@ -724,19 +704,7 @@ export function registerChatToolHandlers() {
 			}
 
 			await fs.mkdir(blockDir, { recursive: true });
-			await fs.mkdir(contextDir, { recursive: true });
 			await fs.writeFile(diagramPath, `${diagramContent.replace(/\r\n/g, "\n").trim()}\n`, "utf8");
-
-			const contextPointers = contextBody
-				.split(/\n{2,}/)
-				.map((entry) => entry.trim())
-				.filter(Boolean);
-			const contextContent = serializeContextMarkdown({
-				title: nextContextTitle,
-				description: nextContextDescription,
-				pointers: contextPointers,
-			});
-			await fs.writeFile(nextContextPath, contextContent, "utf8");
 
 			const schemaContent = serializeBlockSchema({
 				title: nextTitle,

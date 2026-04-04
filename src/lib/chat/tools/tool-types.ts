@@ -339,9 +339,6 @@ export interface ChatToolContext {
 		diagramFilename?: string;
 		diagramContent?: string;
 		contextFilename?: string;
-		contextTitle?: string;
-		contextDescription?: string;
-		contextBody: string;
 	}) => Promise<{
 		id: string;
 		title: string;

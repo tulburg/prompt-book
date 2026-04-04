@@ -2,6 +2,7 @@ import { resolveChatModelProfile } from "./chat/model-profiles";
 import { buildQueryContext } from "./chat/query-context";
 import { buildAnthropicRequest } from "./chat/request-builder";
 import { ChatSessionStore, createTranscriptEntry } from "./chat/session-store";
+import { stripThinkingBlocks } from "./chat/thinking-tags";
 import type { ChatModelInfo, ChatModelProvider } from "./chat/chat-models";
 import { executeToolCalls } from "./chat/tools/tool-orchestration";
 import { createToolContext } from "./chat/tools/tool-runtime";
@@ -171,7 +172,6 @@ function trackOdexMetadataWrites(
 		}
 		if (item.call.name === "Block" && action === "write") {
 			state.blockWritten = true;
-			state.contextWritten = true;
 		}
 	}
 }
@@ -846,8 +846,7 @@ export class ChatService {
 				}
 			}
 
-			const cleaned = titleText
-				.replace(/<think>[\s\S]*?<\/think>/g, "")
+			const cleaned = stripThinkingBlocks(titleText)
 				.replace(/^["']|["']$/g, "")
 				.replace(/\.+$/, "")
 				.trim();

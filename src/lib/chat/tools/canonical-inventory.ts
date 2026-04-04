@@ -51,7 +51,7 @@ export const CANONICAL_TOOL_INVENTORY: CanonicalToolInventoryEntry[] = [
 		uiKind: "json",
 		claudeImplementation: "src/lib/chat/tools/builtin/block-tool.ts",
 		status: "implemented",
-		notes: "Persists block schemas in .odex/blocks and keeps block diagram and linked context in sync.",
+		notes: "Persists block schemas and diagrams in .odex/blocks; links to separately written context in .odex/context.",
 	},
 	{
 		name: "Config",

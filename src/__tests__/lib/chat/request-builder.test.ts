@@ -74,7 +74,9 @@ const fakeToolContext: ChatToolContext = {
 		definition: input.definition ?? "Chat tool architecture",
 		schemaPath: `/workspace/.odex/blocks/${input.blockId}/block.json`,
 		diagramPath: `/workspace/.odex/blocks/${input.blockId}/diagram.mmd`,
-		contextPath: `/workspace/.odex/context/${input.blockId}.md`,
+		contextPath: input.contextFilename
+			? `/workspace/.odex/context/${input.contextFilename}`
+			: `/workspace/.odex/context/${input.blockId}.md`,
 		files: input.files ?? [],
 		action: "updated",
 	}),

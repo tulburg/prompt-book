@@ -27,7 +27,7 @@ export function normalizeContextFilename(filename: string): string {
 		throw new Error("Context filename must not include directory separators.");
 	}
 	if (!/^[a-zA-Z0-9._-]+\.md$/i.test(trimmed)) {
-		throw new Error("Context filename must be a markdown filename like codebase.md.");
+		throw new Error("Context filename must be a valid markdown filename ending in .md.");
 	}
 	return trimmed;
 }

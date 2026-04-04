@@ -210,32 +210,9 @@ function installWindowStubs(files: FileMap) {
 							? payload.contextFilename.trim()
 							: `${blockId}.md`;
 					const contextPath = `/workspace/.odex/context/${contextFilename}`;
-					const contextContent = files.get(contextPath);
-					const parsedContext = contextContent ? parseContextMarkdown(contextFilename, contextContent) : null;
-					const nextContextTitle =
-						typeof payload?.contextTitle === "string" && payload.contextTitle.trim()
-							? payload.contextTitle.trim()
-							: parsedContext?.title || title;
-					const nextContextDescription =
-						typeof payload?.contextDescription === "string" && payload.contextDescription.trim()
-							? payload.contextDescription.trim()
-							: parsedContext?.description || definition;
-					const contextBody = String(payload?.contextBody ?? "").trim();
-					if (!title || !definition || !contextBody) {
+					if (!title || !definition) {
 						throw new Error("Missing block metadata.");
 					}
-					const contextPointers = contextBody
-						.split(/\n{2,}/)
-						.map((entry: string) => entry.trim())
-						.filter(Boolean);
-					files.set(
-						contextPath,
-						serializeContextMarkdown({
-							title: nextContextTitle,
-							description: nextContextDescription,
-							pointers: contextPointers,
-						}),
-					);
 					files.set(
 						diagramPath,
 						String(payload?.diagramContent ?? "flowchart TD\n    Block[\"Chat Tools\"]\n").trimEnd() + "\n",
@@ -446,7 +423,7 @@ describe("tool runtime", () => {
 		});
 	});
 
-	it("lists, reads, and writes stored blocks", async () => {
+	it("lists, reads, and writes stored blocks while leaving context writes explicit", async () => {
 		const files = new Map<string, string>([
 			[
 				"/workspace/.odex/blocks/chat-tools/block.json",
@@ -482,6 +459,12 @@ describe("tool runtime", () => {
 		expect(read.title).toBe("Chat Tools");
 		expect(read.diagramPath).toBe("/workspace/.odex/blocks/chat-tools/diagram.mmd");
 
+		await context.writeContext({
+			filename: "chat-tools.md",
+			description: "Context for the chat tools block.",
+			contentBody: "Tool registry at src/lib/chat/tools/tool-registry.ts manages available tools.\n\nBlock persistence and block-level model instructions handled by block-tool.ts.",
+		});
+
 		const written = await context.writeBlock({
 			blockId: "chat-tools",
 			definition: "The chat tool runtime, context tool, and block tool layer.",
@@ -489,7 +472,6 @@ describe("tool runtime", () => {
 				"/workspace/src/lib/chat/tools/tool-registry.ts",
 				"/workspace/src/lib/chat/tools/builtin/block-tool.ts",
 			],
-			contextBody: "Tool registry at src/lib/chat/tools/tool-registry.ts manages available tools.\n\nBlock persistence and block-level model instructions handled by block-tool.ts.",
 			diagramContent: 'flowchart TD\n    Block["Chat Tools"]\n    Runtime["Tool Runtime"]\n    Block --> Runtime',
 		});
 		expect(written.action).toBe("updated");
@@ -500,9 +482,16 @@ describe("tool runtime", () => {
 		expect(files.get("/workspace/.odex/blocks/chat-tools/diagram.mmd")).toContain("Tool Runtime");
 	});
 
-	it("creates a new block and linked context when none exist yet", async () => {
+	it("creates a new block that links to a separately written context", async () => {
 		const files = new Map<string, string>();
 		const context = await makeContext(files);
+
+		await context.writeContext({
+			filename: "app-frontend-ui.md",
+			title: "Frontend UI",
+			description: "Renderer UI built with React and Vite.",
+			contentBody: "Entry point at src/main.tsx renders the React app.\n\nApp shell at src/app.tsx provides layout and routing.",
+		});
 
 		const written = await context.writeBlock({
 			blockId: "app-frontend-ui",
@@ -512,7 +501,6 @@ describe("tool runtime", () => {
 				"/workspace/src/main.tsx",
 				"/workspace/src/app.tsx",
 			],
-			contextBody: "Entry point at src/main.tsx renders the React app.\n\nApp shell at src/app.tsx provides layout and routing.",
 		});
 
 		expect(written.action).toBe("created");
@@ -523,5 +511,20 @@ describe("tool runtime", () => {
 		expect(files.get("/workspace/.odex/context/app-frontend-ui.md")).toContain(
 			"App shell at src/app.tsx provides layout and routing.",
 		);
+	});
+
+	it("does not create a context file as a side effect of block writes", async () => {
+		const files = new Map<string, string>();
+		const context = await makeContext(files);
+
+		await context.writeBlock({
+			blockId: "backend-api",
+			title: "Backend API",
+			definition: "Express server handling API routes.",
+			files: ["/workspace/src/server.ts"],
+		});
+
+		expect(files.has("/workspace/.odex/blocks/backend-api/block.json")).toBe(true);
+		expect(files.has("/workspace/.odex/context/backend-api.md")).toBe(false);
 	});
 });

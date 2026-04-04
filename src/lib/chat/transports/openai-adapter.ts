@@ -1,4 +1,8 @@
 import { buildOpenAiChatCompletionRequest } from "../openai-chat-codec";
+import {
+	extractReasoningText,
+	extractVisibleTextContent,
+} from "../thinking-tags";
 import type { JsonObject } from "../tools/tool-types";
 import type { AnthropicRequest, ChatTransportEvent } from "../types";
 
@@ -51,6 +55,7 @@ export class OpenAiChatAdapter {
 			const decoder = new TextDecoder();
 			let buffer = "";
 			const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+			let thinkingOpen = false;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -81,9 +86,26 @@ export class OpenAiChatAdapter {
 
 					const parsed = JSON.parse(data) as OpenAiChatCompletionChunk;
 					for (const choice of parsed.choices ?? []) {
-						const content = extractChatCompletionText(choice.delta?.content);
+						const events: ChatTransportEvent[] = [];
+						const closeThinkingIfNeeded = () => {
+							if (!thinkingOpen) {
+								return;
+							}
+							events.push({ type: "content_delta", text: "</think>" });
+							thinkingOpen = false;
+						};
+						const reasoning = extractReasoningText(choice.delta);
+						if (reasoning) {
+							if (!thinkingOpen) {
+								events.push({ type: "content_delta", text: "<think>" });
+								thinkingOpen = true;
+							}
+							events.push({ type: "content_delta", text: reasoning });
+						}
+						const content = extractVisibleTextContent(choice.delta?.content);
 						if (content) {
-							yield { type: "content_delta", text: content };
+							closeThinkingIfNeeded();
+							events.push({ type: "content_delta", text: content });
 						}
 						for (const toolCall of choice.delta?.tool_calls ?? []) {
 							const index = toolCall.index ?? 0;
@@ -98,10 +120,19 @@ export class OpenAiChatAdapter {
 								arguments: `${previous.arguments}${toolCall.function?.arguments ?? ""}`,
 							});
 						}
+						if ((choice.delta?.tool_calls?.length ?? 0) > 0) {
+							closeThinkingIfNeeded();
+						}
+						for (const event of events) {
+							yield event;
+						}
 					}
 				}
 			}
 
+			if (thinkingOpen) {
+				yield { type: "content_delta", text: "</think>" };
+			}
 			const resolvedToolCalls = [...toolCalls.values()]
 				.map((call) => ({
 					id: call.id,
@@ -115,10 +146,28 @@ export class OpenAiChatAdapter {
 		} else {
 			const payload = (await response.json()) as OpenAiChatCompletionResponse;
 			const toolCalls: Array<{ id: string; name: string; input: JsonObject }> = [];
+			let thinkingOpen = false;
 			for (const choice of payload.choices ?? []) {
-				const content = extractChatCompletionText(choice.message?.content);
+				const events: ChatTransportEvent[] = [];
+				const closeThinkingIfNeeded = () => {
+					if (!thinkingOpen) {
+						return;
+					}
+					events.push({ type: "content_delta", text: "</think>" });
+					thinkingOpen = false;
+				};
+				const reasoning = extractReasoningText(choice.message);
+				if (reasoning) {
+					if (!thinkingOpen) {
+						events.push({ type: "content_delta", text: "<think>" });
+						thinkingOpen = true;
+					}
+					events.push({ type: "content_delta", text: reasoning });
+				}
+				const content = extractVisibleTextContent(choice.message?.content);
 				if (content) {
-					yield { type: "content_delta", text: content };
+					closeThinkingIfNeeded();
+					events.push({ type: "content_delta", text: content });
 				}
 				for (const toolCall of choice.message?.tool_calls ?? []) {
 					toolCalls.push({
@@ -127,6 +176,15 @@ export class OpenAiChatAdapter {
 						input: safeParseToolArguments(toolCall.function?.arguments ?? ""),
 					});
 				}
+				if ((choice.message?.tool_calls?.length ?? 0) > 0) {
+					closeThinkingIfNeeded();
+				}
+				for (const event of events) {
+					yield event;
+				}
+			}
+			if (thinkingOpen) {
+				yield { type: "content_delta", text: "</think>" };
 			}
 			if (toolCalls.length > 0) {
 				yield { type: "tool_calls", calls: toolCalls.filter((call) => call.name) };
@@ -150,6 +208,10 @@ type OpenAiChatCompletionChunk = {
 	choices?: Array<{
 		delta?: {
 			content?: string | Array<{ type?: string; text?: string }>;
+			reasoning_content?: string;
+			reasoning?: unknown;
+			reasoning_text?: unknown;
+			thinking?: unknown;
 			tool_calls?: OpenAiToolCallChunk[];
 		};
 	}>;
@@ -159,6 +221,10 @@ type OpenAiChatCompletionResponse = {
 	choices?: Array<{
 		message?: {
 			content?: string | Array<{ type?: string; text?: string }>;
+			reasoning_content?: string;
+			reasoning?: unknown;
+			reasoning_text?: unknown;
+			thinking?: unknown;
 			tool_calls?: Array<{
 				id?: string;
 				function?: {
@@ -177,20 +243,6 @@ type OpenAiApiErrorPayload = {
 		code?: string;
 	};
 };
-
-function extractChatCompletionText(
-	content: string | Array<{ type?: string; text?: string }> | undefined,
-): string {
-	if (typeof content === "string") {
-		return content;
-	}
-	if (Array.isArray(content)) {
-		return content
-			.map((block) => (typeof block?.text === "string" ? block.text : ""))
-			.join("");
-	}
-	return "";
-}
 
 function safeParseToolArguments(raw: string): JsonObject {
 	try {

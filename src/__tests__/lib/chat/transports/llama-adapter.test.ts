@@ -215,6 +215,59 @@ describe("llama adapter streaming", () => {
 		expect(events.join("")).toBe("<think>Plan step 1. Plan step 2.</think>Final answer");
 	});
 
+	it("keeps reasoning content arrays separate from visible llama output", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: [
+										{ type: "reasoning_text", text: "Plan step 1. " },
+										{ type: "summary_text", text: "Plan step 2. " },
+										{ type: "output_text", text: "Final answer" },
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			),
+		);
+
+		const adapter = new LlamaChatAdapter();
+		const events: string[] = [];
+		for await (const event of adapter.stream(
+			{
+				model: "openai/gpt-oss-20b",
+				system: [],
+				messages: [],
+				stream: false,
+				format: "openai",
+				metadata: {
+					sessionId: "session-1",
+					mode: "Agent",
+					provider: "llama",
+				},
+			},
+			{ signal: new AbortController().signal },
+		)) {
+			if (event.type === "content_delta") {
+				events.push(event.text);
+			}
+		}
+
+		expect(events.join("")).toBe(
+			"<think>Plan step 1. Plan step 2. </think>Final answer",
+		);
+	});
+
 	it("parses tool calls emitted as tool-call XML text", async () => {
 		const encoder = new TextEncoder();
 		vi.stubGlobal(

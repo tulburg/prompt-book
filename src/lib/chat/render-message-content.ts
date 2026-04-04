@@ -1,3 +1,5 @@
+import { canonicalizeThinkingTags } from "./thinking-tags";
+
 export type AssistantRenderableSegment =
 	| {
 			kind: "text";
@@ -44,6 +46,7 @@ function pushSegment(
 export function parseAssistantRenderableContent(
 	content: string,
 ): ParsedAssistantContent {
+	content = canonicalizeThinkingTags(content);
 	const segments: AssistantRenderableSegment[] = [];
 
 	let cursor = 0;

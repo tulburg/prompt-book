@@ -8,6 +8,10 @@ import {
 	parseToolCallsFromText,
 	shouldCaptureToolCallText,
 } from "../tool-call-parser";
+import {
+	extractReasoningText,
+	extractVisibleTextContent,
+} from "../thinking-tags";
 import type { AnthropicRequest, ChatTransportEvent } from "../types";
 import type { JsonObject } from "../tools/tool-types";
 
@@ -184,9 +188,7 @@ export class LlamaChatAdapter {
 							};
 
 							const reasoning = filterModelTextContent(
-								typeof source?.reasoning_content === "string"
-									? source.reasoning_content
-									: "",
+								extractReasoningText(source),
 							);
 							if (reasoning) {
 								if (!captureToolText(reasoning)) {
@@ -198,8 +200,9 @@ export class LlamaChatAdapter {
 								}
 							}
 
-							const rawText = extractChatCompletionText(source?.content);
-							const raw = filterModelTextContent(rawText);
+							const raw = filterModelTextContent(
+								extractVisibleTextContent(source?.content),
+							);
 							for (const toolCall of source?.tool_calls ?? []) {
 								const index = toolCall.index ?? 0;
 								const previous = toolCalls.get(index) ?? {
@@ -308,9 +311,7 @@ export class LlamaChatAdapter {
 				};
 
 				const reasoning = filterModelTextContent(
-					typeof choice.message?.reasoning_content === "string"
-						? choice.message.reasoning_content
-						: "",
+					extractReasoningText(choice.message),
 				);
 				if (reasoning && !captureToolText(reasoning)) {
 					if (!thinkingOpen) {
@@ -330,7 +331,7 @@ export class LlamaChatAdapter {
 					closeThinkingIfNeeded();
 				}
 				const raw = filterModelTextContent(
-					extractChatCompletionText(choice.message?.content),
+					extractVisibleTextContent(choice.message?.content),
 				);
 				if (raw) {
 					if (!captureToolText(raw)) {
@@ -373,20 +374,6 @@ export class LlamaChatAdapter {
 
 		yield { type: "message_stop" };
 	}
-}
-
-function extractChatCompletionText(
-	content: string | Array<{ type?: string; text?: string }> | undefined,
-): string {
-	if (typeof content === "string") {
-		return content;
-	}
-	if (Array.isArray(content)) {
-		return content
-			.map((block) => (typeof block?.text === "string" ? block.text : ""))
-			.join("");
-	}
-	return "";
 }
 
 function safeParseToolArguments(raw: string): JsonObject {

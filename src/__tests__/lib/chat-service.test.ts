@@ -397,7 +397,6 @@ describe("chat service", () => {
 													title: "Chat Flow",
 													definition: "Chat request and tool execution flow.",
 													files: ["/workspace/src/lib/chat-service.ts"],
-													context_body: "Chat request and tool execution flow managed by chat-service.ts.\n\nOdex metadata enforcement ensures context and block writes before finishing.",
 												}),
 											},
 										},

@@ -33,7 +33,7 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 			},
 			filename: {
 				type: "string",
-				description: 'Markdown filename inside .odex/context, for example codebase.md. For new contexts, provide the desired filename with action "write".',
+				description: 'Markdown filename inside .odex/context. Choose a name that describes the feature or scope, e.g. auth-flow.md or chat-tools.md. For new contexts, provide the desired filename with action "write".',
 			},
 			title: {
 				type: "string",

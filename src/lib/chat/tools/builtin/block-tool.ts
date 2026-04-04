@@ -11,9 +11,6 @@ type BlockToolInput = JsonObject & {
 	diagram_filename?: string;
 	diagram_content?: string;
 	context_filename?: string;
-	context_title?: string;
-	context_description?: string;
-	context_body?: string;
 };
 
 function formatNumberedContent(content: string, startLine = 1): string {
@@ -30,8 +27,8 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 	uiKind: "json",
 	description: [
 		"List, inspect, and update project blocks stored in .odex/blocks.",
-		"Blocks describe a project feature or workflow with its definition, files, diagram, and linked context.",
-		"Block write can also update the linked context when you provide context metadata and context_body.",
+		"Blocks describe a project feature or workflow with its definition, files, and diagram.",
+		"Block write updates the block schema and diagram only; write the linked context separately with Context.",
 		"Decide blocks from actual code behavior and feature boundaries, not from folder structure alone.",
 		"Use write to create a missing block; do not use read actions for blocks that are not listed yet.",
 		"After project modifications, update at least one affected block.",
@@ -71,19 +68,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 			},
 			context_filename: {
 				type: "string",
-				description: "Context markdown filename in .odex/context.",
-			},
-			context_title: {
-				type: "string",
-				description: "Updated linked-context title.",
-			},
-			context_description: {
-				type: "string",
-				description: "Updated linked-context description.",
-			},
-			context_body: {
-				type: "string",
-				description: "Full replacement body for the linked context map. Point-by-point pointers describing where things are and what they do. Overwrites previous content.",
+				description: "Context markdown filename in .odex/context that this block links to. The actual context content must be written separately with the Context tool.",
 			},
 		},
 		required: ["action"],
@@ -208,9 +193,6 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 				diagramFilename: coerceString(input.diagram_filename) || undefined,
 				diagramContent: coerceString(input.diagram_content) || undefined,
 				contextFilename: coerceString(input.context_filename) || undefined,
-				contextTitle: coerceString(input.context_title) || undefined,
-				contextDescription: coerceString(input.context_description) || undefined,
-				contextBody: coerceString(input.context_body),
 			});
 			const value = {
 				id: result.id,
