@@ -326,6 +326,7 @@ export function ChatPanel({
 
   // Agent variant: archive session to main store on unmount
   const sentInitialPromptRef = React.useRef(false);
+  const initialModelAppliedRef = React.useRef(false);
   React.useEffect(() => {
     if (!isAgent) return;
     return () => {
@@ -336,9 +337,32 @@ export function ChatPanel({
     };
   }, [isAgent]);
 
-  // Agent variant: auto-send initial prompt once session + model are ready
+  // Agent variant: wait for the requested model to appear, set it, then send
   React.useEffect(() => {
-    if (!isAgent || !initialPrompt?.trim() || sentInitialPromptRef.current) return;
+    if (!isAgent || !initialModelId || initialModelAppliedRef.current) return;
+    const model = availableModels.find((m) => m.id === initialModelId);
+    if (!model) return;
+    initialModelAppliedRef.current = true;
+    setSelectedModel(model);
+    chatService.currentModel = model;
+    if (
+      initialPrompt?.trim() &&
+      !sentInitialPromptRef.current &&
+      activeSession
+    ) {
+      sentInitialPromptRef.current = true;
+      chatService.setActiveSession(activeSession.id);
+      void chatService.sendMessage(initialPrompt.trim(), {
+        mode: "Agent",
+        settings,
+      });
+    }
+  }, [isAgent, initialModelId, availableModels, activeSession, initialPrompt, settings]);
+
+  // Agent variant (no initialModelId): auto-send once any model is ready
+  React.useEffect(() => {
+    if (!isAgent || initialModelId) return;
+    if (!initialPrompt?.trim() || sentInitialPromptRef.current) return;
     if (!activeSession || !selectedModel) return;
     sentInitialPromptRef.current = true;
     chatService.setActiveSession(activeSession.id);
@@ -346,13 +370,10 @@ export function ChatPanel({
       mode: "Agent",
       settings,
     });
-  }, [isAgent, initialPrompt, activeSession, selectedModel, settings]);
+  }, [isAgent, initialModelId, initialPrompt, activeSession, selectedModel, settings]);
 
   React.useEffect(() => {
-    // initialModelId takes priority: when a fallback model overwrites
-    // activeSession.modelId, we still prefer the originally requested model
-    // once it becomes available in availableModels.
-    const preferredModelId = initialModelId ?? activeSession?.modelId ?? selectedModel?.id ?? null;
+    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
     const nextSelectedModel =
       (preferredModelId
         ? availableModels.find((model) => model.id === preferredModelId)
@@ -378,7 +399,7 @@ export function ChatPanel({
 
     setSelectedModel(nextSelectedModel);
     chatService.currentModel = nextSelectedModel;
-  }, [initialModelId, activeSession?.modelId, availableModels, selectedModel]);
+  }, [activeSession?.modelId, availableModels, selectedModel]);
 
   React.useEffect(() => {
     if (!selectedModel || !isLocalChatModel(selectedModel)) {
