@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Button } from "../lower/Button";
+import { MarkdownMessage } from "./MarkdownMessage";
 import { parseMermaid } from "@/lib/mermaid/parser";
 import { layoutGraph } from "@/lib/mermaid/layout";
 import { DEFAULT_MERMAID_FLOW } from "@/lib/mermaid/default-flow";
@@ -384,9 +385,7 @@ function MermaidCanvas() {
 								<div className="mb-2 text-sm font-semibold text-foreground">
 									{selectedNode.title}
 								</div>
-								<div className="text-xs leading-relaxed text-foreground/70">
-									{selectedNode.description}
-								</div>
+								<MarkdownMessage content={selectedNode.description} />
 							</div>
 						)}
 					</div>
