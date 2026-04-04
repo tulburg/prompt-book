@@ -349,7 +349,10 @@ export function ChatPanel({
   }, [isAgent, initialPrompt, activeSession, selectedModel, settings]);
 
   React.useEffect(() => {
-    const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
+    // initialModelId takes priority: when a fallback model overwrites
+    // activeSession.modelId, we still prefer the originally requested model
+    // once it becomes available in availableModels.
+    const preferredModelId = initialModelId ?? activeSession?.modelId ?? selectedModel?.id ?? null;
     const nextSelectedModel =
       (preferredModelId
         ? availableModels.find((model) => model.id === preferredModelId)
@@ -375,7 +378,7 @@ export function ChatPanel({
 
     setSelectedModel(nextSelectedModel);
     chatService.currentModel = nextSelectedModel;
-  }, [activeSession?.modelId, availableModels, selectedModel]);
+  }, [initialModelId, activeSession?.modelId, availableModels, selectedModel]);
 
   React.useEffect(() => {
     if (!selectedModel || !isLocalChatModel(selectedModel)) {
