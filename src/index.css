@@ -85,10 +85,18 @@
   * {
     border-color: var(--color-border);
   }
+  html,
   body {
-    background-color: var(--color-background);
+    background-color: var(--color-panel);
     font-size: 13px;
     color: var(--color-foreground);
+  }
+
+  @media (prefers-color-scheme: light) {
+    html,
+    body {
+      background-color: var(--color-background);
+    }
   }
 }
 
