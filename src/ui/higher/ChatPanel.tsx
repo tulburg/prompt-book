@@ -56,12 +56,22 @@ import * as React from "react";
 interface ChatPanelProps {
   className?: string;
   onOpenFileAtLine?: (path: string, line: number) => void | Promise<void>;
+  /** "full" (default) shows tabs + history; "agent" hides them for agent windows */
+  variant?: "full" | "agent";
+  /** Called when agent window requests close */
+  onClose?: () => void;
+  /** Initial prompt to auto-send (agent variant only) */
+  initialPrompt?: string;
 }
 
 export function ChatPanel({
   className,
   onOpenFileAtLine,
+  variant = "full",
+  onClose,
+  initialPrompt,
 }: ChatPanelProps) {
+  const isAgent = variant === "agent";
   const { settings } = useApplicationSettings();
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
@@ -303,6 +313,30 @@ export function ChatPanel({
     };
   }, []);
 
+  // Agent variant: archive session on unmount
+  const sentInitialPromptRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isAgent) return;
+    return () => {
+      const sid = activeSessionIdRef.current;
+      if (sid) {
+        chatService.closeSession(sid);
+      }
+    };
+  }, [isAgent]);
+
+  // Agent variant: auto-send initial prompt once session + model are ready
+  React.useEffect(() => {
+    if (!isAgent || !initialPrompt?.trim() || sentInitialPromptRef.current) return;
+    if (!activeSession || !selectedModel) return;
+    sentInitialPromptRef.current = true;
+    chatService.setActiveSession(activeSession.id);
+    void chatService.sendMessage(initialPrompt.trim(), {
+      mode: "Agent",
+      settings,
+    });
+  }, [isAgent, initialPrompt, activeSession, selectedModel, settings]);
+
   React.useEffect(() => {
     const preferredModelId = activeSession?.modelId ?? selectedModel?.id ?? null;
     const nextSelectedModel =
@@ -442,7 +476,10 @@ export function ChatPanel({
     (cmd: (typeof slashCommands)[number]) => {
       setInputValue(`/${cmd.name} `);
       setSlashMenuOpen(false);
-      textareaRef.current?.focus();
+      // Re-focus textarea on next tick to ensure focus returns after menu interaction
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
     },
     [slashCommands],
   );
@@ -490,15 +527,36 @@ export function ChatPanel({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
 
     // Slash command detection: show menu when input starts with "/"
-    const slashMatch = value.match(/^\/(\w*)$/);
-    if (slashMatch) {
-      setSlashFilter(slashMatch[1]);
+    // Match "/word" at the start, allow trailing text for argument (e.g. "/agent fix this bug")
+    const slashMatch = value.match(/^\/(\w*)(?:\s|$)/);
+    if (value === "/" || slashMatch) {
+      setSlashFilter(slashMatch ? slashMatch[1] : "");
       setSlashMenuOpen(true);
       setSlashMenuIndex(0);
-    } else {
+    } else if (!value.startsWith("/")) {
       setSlashMenuOpen(false);
     }
   };
+
+  // Refocus textarea when slash menu closes to prevent focus loss
+  React.useEffect(() => {
+    if (!slashMenuOpen && textareaRef.current && inputValue.startsWith("/")) {
+      textareaRef.current.focus();
+    }
+  }, [slashMenuOpen, inputValue]);
+
+  // Close slash menu on click outside the input area
+  React.useEffect(() => {
+    if (!slashMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const inputArea = textareaRef.current?.closest(".relative");
+      if (inputArea && !inputArea.contains(e.target as Node)) {
+        setSlashMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [slashMenuOpen]);
 
   // Close history popup on click outside
   React.useEffect(() => {
@@ -605,7 +663,32 @@ export function ChatPanel({
     <div
       className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-500 bg-panel ${className ?? ""}`}
     >
-      {/* Tab bar */}
+      {/* Agent header (minimal) */}
+      {isAgent && (
+        <div
+          className="flex h-[38px] shrink-0 items-center justify-between border-b border-border-500 px-3"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        >
+          <div className="flex items-center gap-1.5">
+            <Bot className="h-3.5 w-3.5 text-foreground-900" />
+            <span className="text-xs font-semibold text-foreground">Agent</span>
+          </div>
+          {onClose && (
+            <button
+              className="flex size-6 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-900 hover:bg-border-500 hover:text-foreground"
+              style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+              onClick={onClose}
+              aria-label="Close agent"
+              title="Close agent"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tab bar (full variant only) */}
+      {!isAgent && (
       <div className="flex h-[35px] shrink-0 items-center justify-between border-b border-border-500 px-1">
         <TinyScrollArea
           direction="horizontal"
@@ -663,9 +746,10 @@ export function ChatPanel({
           </button>
         </div>
       </div>
+      )}
 
-      {/* History popup */}
-      {showHistory && (
+      {/* History popup (full variant only) */}
+      {!isAgent && showHistory && (
         <div
           ref={historyRef}
           className="absolute right-2 top-[40px] z-50 flex max-h-[320px] w-[280px] flex-col rounded-lg border border-border-500 bg-panel shadow-lg"
@@ -750,20 +834,21 @@ export function ChatPanel({
               </div>
               {filteredSlashCommands.map((cmd, idx) => {
                 const Icon = cmd.icon;
+                const isFocused = idx === slashMenuIndex;
                 return (
                   <button
                     key={cmd.name}
-                    className={`flex w-full cursor-pointer items-center gap-2.5 border-none bg-transparent px-2.5 py-2 text-left text-xs text-foreground transition-colors hover:bg-border-500 ${idx === slashMenuIndex ? "bg-border-500" : ""}`}
+                    className={`flex w-full cursor-pointer items-center gap-2.5 border-none px-2.5 py-2 text-left text-xs transition-colors ${isFocused ? "bg-sky/15 text-sky" : "bg-transparent text-foreground hover:bg-border-500"}`}
                     onMouseDown={(e) => {
                       e.preventDefault(); // prevent blur
                       handleSelectSlashCommand(cmd);
                     }}
                     onMouseEnter={() => setSlashMenuIndex(idx)}
                   >
-                    <Icon className="h-4 w-4 shrink-0 text-foreground-900" />
+                    <Icon className={`h-4 w-4 shrink-0 ${isFocused ? "text-sky" : "text-foreground-900"}`} />
                     <div className="flex flex-col gap-0.5">
                       <span className="font-medium">/{cmd.name}</span>
-                      <span className="text-[11px] text-foreground-900">
+                      <span className={`text-[11px] ${isFocused ? "text-sky/70" : "text-foreground-900"}`}>
                         {cmd.description}
                       </span>
                     </div>
