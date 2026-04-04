@@ -17,6 +17,36 @@ function createProjectBridge(files: FileMap) {
 		restoreLastProject: vi.fn(async () => ({
 			roots: [{ path: "/workspace" }],
 		})),
+		listDirectory: vi.fn(async (directoryPath: string) => {
+			const normalizedPath = directoryPath.replace(/\/+$/, "") || "/";
+			const prefix = normalizedPath === "/" ? "/" : `${normalizedPath}/`;
+			const childNames = new Set<string>();
+			for (const filePath of files.keys()) {
+				if (!filePath.startsWith(prefix)) {
+					continue;
+				}
+				const remainder = filePath.slice(prefix.length);
+				const childName = remainder.split("/")[0]?.trim();
+				if (childName) {
+					childNames.add(childName);
+				}
+			}
+			if (childNames.size === 0) {
+				throw new Error(`ENOENT: no such file or directory, scandir '${directoryPath}'`);
+			}
+			return {
+				path: normalizedPath,
+				children: [...childNames].map((name) => ({
+					path: `${prefix}${name}`.replace("//", "/"),
+					name,
+					kind: "directory" as const,
+					parentPath: normalizedPath,
+					rootPath: "/workspace",
+					permissions: { read: true, write: true, status: "granted" as const },
+				})),
+				permissions: { read: true, write: true, status: "granted" as const },
+			};
+		}),
 		readFile: vi.fn(async (filePath: string) => {
 			const content = files.get(filePath);
 			if (content === undefined) {
@@ -389,6 +419,26 @@ describe("tool runtime", () => {
 		expect(files.get("/workspace/.odex/context/codebase.md")).toContain(
 			"Added a persistent Context tool backed by .odex/context.",
 		);
+	});
+
+	it("marks the tool context as Odex-managed when .odex exists", async () => {
+		const files = new Map<string, string>([
+			[
+				"/workspace/.odex/context/codebase.md",
+				serializeContextMarkdown({
+					title: "Codebase",
+					description: "Project overview.",
+					paragraphs: ["[2026-04-04T00:00:00.000Z] Bootstrapped context."],
+				}),
+			],
+		]);
+
+		const context = await makeContext(files);
+
+		expect(context.odex).toEqual({
+			isManagedProject: true,
+			rootPaths: ["/workspace"],
+		});
 	});
 
 	it("lists, reads, and writes stored blocks", async () => {

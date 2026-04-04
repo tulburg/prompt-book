@@ -23,6 +23,11 @@ function normalizePath(filePath: string): string {
 	return filePath.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
 }
 
+function joinPath(parentPath: string, name: string): string {
+	const normalizedParent = normalizePath(parentPath);
+	return normalizedParent === "/" ? `/${name}` : `${normalizedParent}/${name}`;
+}
+
 function normalizeLineEndings(content: string): string {
 	return content.replace(/\r\n/g, "\n");
 }
@@ -154,6 +159,23 @@ async function getWorkspaceRoots(): Promise<string[]> {
 	return snapshot?.roots.map((root) => root.path) ?? [];
 }
 
+async function detectOdexWorkspaceRoots(
+	workspaceRoots: string[],
+): Promise<string[]> {
+	const projectBridge = getProjectBridge();
+	if (!projectBridge) return [];
+	const odexRoots: string[] = [];
+	for (const root of workspaceRoots) {
+		try {
+			await projectBridge.listDirectory(joinPath(root, ".odex"));
+			odexRoots.push(normalizePath(root));
+		} catch {
+			// Not every workspace root is Odex-managed.
+		}
+	}
+	return odexRoots;
+}
+
 type TodoItem = {
 	id: string;
 	content: string;
@@ -182,6 +204,7 @@ export function createToolContext(options: {
 }): Promise<ChatToolContext> {
 	return (async () => {
 		const workspaceRoots = await getWorkspaceRoots();
+		const odexRootPaths = await detectOdexWorkspaceRoots(workspaceRoots);
 		const readSnapshots = new Map<string, ReadSnapshot>();
 
 		const readRawFile = async (path: string) => {
@@ -456,6 +479,10 @@ export function createToolContext(options: {
 			modelId: options.modelId,
 			workspaceRoots,
 			signal: options.signal,
+			odex: {
+				isManagedProject: odexRootPaths.length > 0,
+				rootPaths: odexRootPaths,
+			},
 			stopGeneration: options.stopGeneration,
 			setMode: options.setMode,
 			async readFile(path, readOptions) {

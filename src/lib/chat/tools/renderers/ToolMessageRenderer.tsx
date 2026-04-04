@@ -16,12 +16,14 @@ import type {
 } from "@/lib/chat/tools/tool-types";
 import {
   ChevronUp,
+  Cuboid,
   FileText,
   Globe,
   ListChecks,
   Loader2,
   Pencil,
   Search,
+  Shapes,
   Sparkles,
   SquareTerminal,
   FilePlus,
@@ -152,6 +154,10 @@ function getToolIcon(toolName: string): React.ReactNode {
       return <ListChecks className={cls} />;
     case "AskUserQuestion":
       return <Sparkles className={cls} />;
+    case "Context":
+      return <Shapes className={cls} />;
+    case "Block":
+      return <Cuboid className={cls} />;
     case "Agent":
     case "Task":
     case "TaskOutput":
@@ -634,6 +640,31 @@ interface ToolAction {
   previewStateKey?: string;
   filePath?: string;
   fileLine?: number;
+}
+
+function getBlockActionSummary(input: JsonObject): string | null {
+  const action = typeof input.action === "string" ? input.action : "";
+  const blockId = typeof input.block_id === "string" ? input.block_id : "";
+  if (!action) {
+    return blockId || null;
+  }
+
+  switch (action) {
+    case "list":
+      return "List Blocks";
+    case "read":
+      return blockId ? `Read Block: ${blockId}` : "Read Block";
+    case "read_context":
+      return blockId ? `Read Block Context: ${blockId}` : "Read Block Context";
+    case "read_diagram":
+      return blockId ? `Read Block Diagram: ${blockId}` : "Read Block Diagram";
+    case "read_files":
+      return blockId ? `Read Block Files: ${blockId}` : "Read Block Files";
+    case "write":
+      return blockId ? `Write Block: ${blockId}` : "Write Block";
+    default:
+      return blockId ? `Block: ${blockId}` : "Block";
+  }
 }
 
 function buildToolAction(
@@ -1135,6 +1166,55 @@ function buildToolAction(
 
       return {
         icon: isRunning ? <SpinnerIcon /> : getToolIcon("AskUserQuestion"),
+        label,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
+    case "Block": {
+      const summary = getBlockActionSummary(input) ?? "Block";
+      const label = isRunning ? (
+        <span className="tool-title-shimmer">{summary}</span>
+      ) : (
+        <span>{summary}</span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "json") {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
+            {(maxH) => (
+              <MonacoCodeView
+                value={JSON.stringify(display.value, null, 2)}
+                language="json"
+                maxHeight={maxH}
+              />
+            )}
+          </PreviewBox>
+        );
+      } else if (display?.kind === "input_output" && display.output) {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
+            {(maxH) => (
+              <MonacoCodeView value={display.output!} maxHeight={maxH} />
+            )}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("Block"),
         label,
         preview,
         previewStateKey: preview ? stateKey : undefined,

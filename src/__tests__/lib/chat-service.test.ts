@@ -3,10 +3,100 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_APPLICATION_SETTINGS } from "@/lib/application-settings";
 import { ChatService } from "@/lib/chat-service";
 
+function installOdexToolStubs() {
+	Object.defineProperty(window, "projectBridge", {
+		configurable: true,
+		value: {
+			restoreLastProject: vi.fn(async () => ({
+				roots: [{ path: "/workspace" }],
+			})),
+			listDirectory: vi.fn(async (directoryPath: string) => {
+				if (directoryPath === "/workspace/.odex") {
+					return {
+						path: directoryPath,
+						children: [],
+						permissions: { read: true, write: true, status: "granted" as const },
+					};
+				}
+				throw new Error(`ENOENT: no such file or directory, scandir '${directoryPath}'`);
+			}),
+		},
+	});
+	Object.defineProperty(window, "ipcRenderer", {
+		configurable: true,
+		value: {
+			invoke: vi.fn(async (channel: string, payload?: Record<string, unknown>) => {
+				if (channel === "chat-tools:context-write") {
+					const filename = String(payload?.filename ?? "codebase.md");
+					return {
+						filename,
+						title: String(payload?.title ?? "Codebase"),
+						description: String(payload?.description ?? "Project context"),
+						path: `/workspace/.odex/context/${filename}`,
+						content: String(payload?.paragraph ?? ""),
+						action: "updated" as const,
+					};
+				}
+				if (channel === "chat-tools:block-write") {
+					const blockId = String(payload?.blockId ?? "core");
+					return {
+						id: blockId,
+						title: String(payload?.title ?? "Core"),
+						definition: String(payload?.definition ?? "Core workflow"),
+						schemaPath: `/workspace/.odex/blocks/${blockId}/block.json`,
+						diagramPath: `/workspace/.odex/blocks/${blockId}/diagram.mmd`,
+						contextPath: `/workspace/.odex/blocks/${blockId}/context/${blockId}.md`,
+						files: Array.isArray(payload?.files)
+							? payload.files.filter((value): value is string => typeof value === "string")
+							: [],
+						action: "updated" as const,
+					};
+				}
+				if (channel === "chat-tools:context-list" || channel === "chat-tools:block-list") {
+					return { items: [] };
+				}
+				if (channel === "chat-tools:glob") {
+					return { items: [], truncated: false };
+				}
+				if (channel === "chat-tools:grep") {
+					return {
+						mode: "files_with_matches",
+						output: "",
+						files: [],
+						truncated: false,
+						counts: [],
+					};
+				}
+				if (channel === "chat-tools:run-command") {
+					return {
+						stdout: "",
+						stderr: "",
+						exitCode: 0,
+						cwd: "/workspace",
+						status: "completed",
+					};
+				}
+				if (channel === "chat-tools:stop-task") {
+					return { taskId: payload?.taskId, command: "sleep 1" };
+				}
+				throw new Error(`Unexpected IPC channel: ${channel}`);
+			}),
+		},
+	});
+}
+
 describe("chat service", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		window.localStorage.clear();
+		Object.defineProperty(window, "projectBridge", {
+			configurable: true,
+			value: undefined,
+		});
+		Object.defineProperty(window, "ipcRenderer", {
+			configurable: true,
+			value: undefined,
+		});
 	});
 
 	it("sends the accepted user turn once and forwards the active mode", async () => {
@@ -251,7 +341,7 @@ describe("chat service", () => {
 			displayName: "GPT OSS 20B",
 			provider: "llama",
 		};
-		service.createSession();
+		service.createSession("Odex Session");
 
 		await service.sendMessage("Use a tool");
 
@@ -264,6 +354,108 @@ describe("chat service", () => {
 			true,
 		);
 		expect(messages.at(-1)?.content).toBe("Finished after tool.");
+	});
+
+	it("enforces Odex metadata writes before allowing the model to finish", async () => {
+		installOdexToolStubs();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "Done without metadata." } }],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: "",
+									tool_calls: [
+										{
+											id: "call_context",
+											function: {
+												name: "Context",
+												arguments: JSON.stringify({
+													action: "write",
+													filename: "codebase.md",
+													title: "Codebase",
+													description: "Current codebase context.",
+													paragraph: "Captured the latest workflow notes.",
+												}),
+											},
+										},
+										{
+											id: "call_block",
+											function: {
+												name: "Block",
+												arguments: JSON.stringify({
+													action: "write",
+													block_id: "chat-flow",
+													title: "Chat Flow",
+													definition: "Chat request and tool execution flow.",
+													files: ["/workspace/src/lib/chat-service.ts"],
+													context_paragraph: "Updated the enforced Odex metadata flow.",
+												}),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "Finished after metadata updates." } }],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "openai/gpt-oss-20b",
+			displayName: "GPT OSS 20B",
+			provider: "llama",
+		};
+		service.createSession("Odex Session");
+
+		await service.sendMessage("Inspect the project and keep Odex metadata up to date.");
+
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		const messages = service.activeSession?.messages ?? [];
+		expect(messages.some((message) => message.content === "Done without metadata.")).toBe(
+			false,
+		);
+		expect(
+			messages.some(
+				(message) => message.toolResult?.toolName === "Context" && message.subtype === "tool_result",
+			),
+		).toBe(true);
+		expect(
+			messages.some(
+				(message) => message.toolResult?.toolName === "Block" && message.subtype === "tool_result",
+			),
+		).toBe(true);
+		expect(messages.at(-1)?.content).toBe("Finished after metadata updates.");
 	});
 
 	it("pauses the tool loop after AskUserQuestion so the next user reply can continue", async () => {

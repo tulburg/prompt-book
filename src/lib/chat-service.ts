@@ -2,15 +2,16 @@ import { resolveChatModelProfile } from "./chat/model-profiles";
 import { buildQueryContext } from "./chat/query-context";
 import { buildAnthropicRequest } from "./chat/request-builder";
 import { ChatSessionStore, createTranscriptEntry } from "./chat/session-store";
-import type { ChatModelInfo } from "./chat/chat-models";
+import type { ChatModelInfo, ChatModelProvider } from "./chat/chat-models";
 import { executeToolCalls } from "./chat/tools/tool-orchestration";
 import { createToolContext } from "./chat/tools/tool-runtime";
-import type { JsonObject } from "./chat/tools/tool-types";
+import type { ChatToolContext, JsonObject } from "./chat/tools/tool-types";
 import { AnthropicChatAdapter } from "./chat/transports/anthropic-adapter";
 import { GeminiChatAdapter } from "./chat/transports/gemini-adapter";
 import { LlamaChatAdapter } from "./chat/transports/llama-adapter";
 import { OpenAiChatAdapter } from "./chat/transports/openai-adapter";
 import type {
+	AnthropicRequest,
 	ChatMessage,
 	ChatMode,
 	ChatSession,
@@ -95,6 +96,83 @@ function getToolEchoField(input: JsonObject, key: string): string | null {
 	return typeof value === "string" && value.trim().length > 0
 		? value.trim()
 		: null;
+}
+
+type OdexEnforcementState = {
+	isManagedProject: boolean;
+	contextWritten: boolean;
+	blockWritten: boolean;
+	retryCount: number;
+};
+
+function createOdexEnforcementState(
+	toolContext: ChatToolContext | undefined,
+): OdexEnforcementState | null {
+	if (!toolContext?.odex?.isManagedProject) {
+		return null;
+	}
+	return {
+		isManagedProject: true,
+		contextWritten: false,
+		blockWritten: false,
+		retryCount: 0,
+	};
+}
+
+function isOdexEnforcementSatisfied(
+	state: OdexEnforcementState | null,
+): boolean {
+	return (
+		!state ||
+		!state.isManagedProject ||
+		(state.contextWritten && state.blockWritten)
+	);
+}
+
+function buildOdexEnforcementPrompt(
+	state: OdexEnforcementState | null,
+): string | undefined {
+	if (!state || state.retryCount === 0 || isOdexEnforcementSatisfied(state)) {
+		return undefined;
+	}
+	const missing: string[] = [];
+	if (!state.contextWritten) {
+		missing.push("at least one `Context` write");
+	}
+	if (!state.blockWritten) {
+		missing.push("at least one `Block` write");
+	}
+	return [
+		"Odex enforcement is active for this workspace.",
+		`Do not finish or summarize yet. You are still missing ${missing.join(" and ")} in this turn.`,
+		"Call the metadata tools now and only provide a final response after the required writes succeed.",
+		"Follow the existing Odex rules: list before read, read actual code before writing, and update real workflow metadata rather than guessing from file structure.",
+	].join(" ");
+}
+
+function trackOdexMetadataWrites(
+	state: OdexEnforcementState | null,
+	executed: Array<{
+		call: { name: string; input: JsonObject };
+		result: { isError?: boolean };
+	}>,
+): void {
+	if (!state) {
+		return;
+	}
+	for (const item of executed) {
+		if (item.result.isError) {
+			continue;
+		}
+		const action =
+			typeof item.call.input.action === "string" ? item.call.input.action : "";
+		if (item.call.name === "Context" && action === "write") {
+			state.contextWritten = true;
+		}
+		if (item.call.name === "Block" && action === "write") {
+			state.blockWritten = true;
+		}
+	}
 }
 
 class SimpleEmitter<T> {
@@ -347,6 +425,8 @@ export class ChatService {
 
 		const MAX_TOOL_ITERATIONS = 30;
 		const MAX_STREAM_RETRIES = 2;
+		const MAX_ODEX_ENFORCEMENT_RETRIES = 3;
+		let odexEnforcement: OdexEnforcementState | null = null;
 		try {
 			if (abortController.signal.aborted) {
 				throw new DOMException("Aborted", "AbortError");
@@ -377,7 +457,11 @@ export class ChatService {
 									this.updateSessionTodos(session.id, items, merge),
 							})
 						: undefined;
-				const queryContext = buildQueryContext({ session });
+				odexEnforcement ??= createOdexEnforcementState(toolContext);
+				const queryContext = buildQueryContext({
+					session,
+					appendSystemPrompt: buildOdexEnforcementPrompt(odexEnforcement),
+				});
 				const request = buildAnthropicRequest({
 					session,
 					queryContext,
@@ -445,6 +529,48 @@ export class ChatService {
 					assistantContent,
 					assistantToolCalls,
 				);
+				if (assistantToolCalls.length === 0) {
+					if (!isOdexEnforcementSatisfied(odexEnforcement)) {
+						if (
+							(odexEnforcement?.retryCount ?? 0) >=
+							MAX_ODEX_ENFORCEMENT_RETRIES
+						) {
+							this.commitEntry(
+								session.id,
+								createTranscriptEntry({
+									role: "assistant",
+									content:
+										"Odex enforcement could not complete because the required context/block metadata was not updated after multiple attempts.",
+									visibility: "visible",
+									includeInHistory: false,
+									subtype: "error",
+								}),
+							);
+							break;
+						}
+						if (odexEnforcement) {
+							odexEnforcement.retryCount += 1;
+						}
+						console.warn(
+							`[ChatService] Odex enforcement retry ${odexEnforcement?.retryCount ?? 0}/${MAX_ODEX_ENFORCEMENT_RETRIES} for session=${session.id}`,
+						);
+						continue;
+					}
+					if (sanitizedAssistantContent) {
+						this.commitEntry(
+							session.id,
+							createTranscriptEntry({
+								role: "assistant",
+								content: sanitizedAssistantContent,
+								visibility: "visible",
+								includeInHistory: true,
+								subtype: "message",
+							}),
+						);
+					}
+					console.log(`[ChatService] No tool calls, ending loop at iteration ${iteration + 1}`);
+					break;
+				}
 				if (sanitizedAssistantContent) {
 					this.commitEntry(
 						session.id,
@@ -456,11 +582,6 @@ export class ChatService {
 							subtype: "message",
 						}),
 					);
-				}
-
-				if (assistantToolCalls.length === 0) {
-					console.log(`[ChatService] No tool calls, ending loop at iteration ${iteration + 1}`);
-					break;
 				}
 				if (!toolContext) {
 					throw new Error(
@@ -485,6 +606,7 @@ export class ChatService {
 					assistantToolCalls,
 					toolContext,
 				);
+				trackOdexMetadataWrites(odexEnforcement, executed);
 				console.log(
 					`[ChatService] Tool execution done (iteration ${iteration + 1}), results:`,
 					executed.map((e) => ({
@@ -596,6 +718,16 @@ export class ChatService {
 			}
 			this._stopRequested = false;
 			this._streamingSessionId = null;
+
+			const latestSession = this.store.getSnapshot(session.id);
+			if (latestSession && latestSession.title === "New Chat") {
+				void this.generateSessionTitle(
+					latestSession,
+					resolvedModel,
+					resolvedProvider,
+					options,
+				);
+			}
 		}
 	}
 
@@ -622,6 +754,117 @@ export class ChatService {
 			} else {
 				this._isSending = false;
 			}
+		}
+	}
+
+	private async generateSessionTitle(
+		session: ChatSession,
+		model: string,
+		provider: ChatModelProvider,
+		options?: {
+			serverUrl?: string;
+			settings?: ApplicationSettings | null;
+		},
+	): Promise<void> {
+		const userMessages = session.transcript
+			.filter(
+				(entry) =>
+					entry.role === "user" &&
+					entry.visibility === "visible" &&
+					entry.subtype === "message",
+			)
+			.slice(0, 3);
+		const assistantMessages = session.transcript
+			.filter(
+				(entry) =>
+					entry.role === "assistant" &&
+					entry.visibility === "visible" &&
+					entry.subtype === "message",
+			)
+			.slice(0, 2);
+
+		if (userMessages.length === 0) return;
+
+		const conversationSummary = [
+			...userMessages.map((entry) => `User: ${entry.content.slice(0, 200)}`),
+			...assistantMessages.map(
+				(entry) => `Assistant: ${entry.content.slice(0, 200)}`,
+			),
+		].join("\n");
+
+		const profile = resolveChatModelProfile({
+			modelId: model,
+			modelName: this._currentModel?.displayName,
+		});
+		const format =
+			profile.id === "anthropic" || profile.id === "default"
+				? "anthropic"
+				: profile.id === "openai" ||
+					  profile.id === "qwen" ||
+					  profile.id === "gemma" ||
+					  profile.id === "gemini"
+					? profile.id
+					: "anthropic";
+
+		const titleRequest: AnthropicRequest = {
+			model,
+			system: [
+				"Generate a short title (max 6 words) for this conversation. " +
+					"Reply with ONLY the title text, no quotes, no punctuation at the end, no prefixes.",
+			],
+			messages: [
+				{
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: conversationSummary,
+						},
+					],
+				},
+			],
+			stream: true,
+			format,
+			nativeToolCalling: false,
+			metadata: {
+				sessionId: session.id,
+				mode: session.mode,
+				provider,
+			},
+		};
+
+		try {
+			let titleText = "";
+			for await (const event of this.streamModelResponse(titleRequest, {
+				serverUrl: options?.serverUrl,
+				signal: AbortSignal.timeout(15_000),
+				settings: options?.settings,
+			})) {
+				if (event.type === "content_delta") {
+					titleText += event.text;
+				}
+			}
+
+			const cleaned = titleText
+				.replace(/<think>[\s\S]*?<\/think>/g, "")
+				.replace(/^["']|["']$/g, "")
+				.replace(/\.+$/, "")
+				.trim();
+
+			if (cleaned && cleaned.length <= 60) {
+				const updated = this.store.setSessionTitle(session.id, cleaned);
+				if (updated) {
+					this._onDidUpdateSession.fire(updated);
+				}
+				console.log(
+					`[ChatService] Generated session title: "${cleaned}" for session=${session.id}`,
+				);
+			}
+		} catch (error) {
+			console.warn(
+				"[ChatService] Title generation failed (non-critical):",
+				error instanceof Error ? error.message : String(error),
+			);
 		}
 	}
 

@@ -97,6 +97,31 @@ describe("chat session store", () => {
 		]);
 	});
 
+	it("updates session title via setSessionTitle", () => {
+		const store = new ChatSessionStore();
+		const session = store.createSession("New Chat", "model-1");
+
+		expect(store.getSnapshot(session.id)?.title).toBe("New Chat");
+
+		const updated = store.setSessionTitle(session.id, "Auth cleanup");
+
+		expect(updated?.title).toBe("Auth cleanup");
+		expect(store.getSnapshot(session.id)?.title).toBe("Auth cleanup");
+	});
+
+	it("setSessionTitle works for agent sessions", () => {
+		const store = new ChatSessionStore();
+		store.setIsolated(true);
+		const session = store.createSession("New Chat", "model-1", {
+			windowKind: "agent",
+		});
+
+		const updated = store.setSessionTitle(session.id, "Review auth agent");
+
+		expect(updated?.title).toBe("Review auth agent");
+		expect(updated?.windowKind).toBe("agent");
+	});
+
 	it("can take a closed agent session out of history before reopening it", () => {
 		const isolatedStore = new ChatSessionStore();
 		isolatedStore.setIsolated(true);

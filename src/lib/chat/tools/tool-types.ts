@@ -180,6 +180,10 @@ export interface ChatToolContext {
 	modelId: string | null;
 	workspaceRoots: string[];
 	signal: AbortSignal;
+	odex?: {
+		isManagedProject: boolean;
+		rootPaths: string[];
+	};
 	stopGeneration: () => void;
 	setMode: (mode: "Agent" | "Ask" | "Edit") => void;
 	readFile: (

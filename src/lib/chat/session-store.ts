@@ -418,13 +418,18 @@ export class ChatSessionStore {
 		return toSnapshot(session);
 	}
 
+	setSessionTitle(sessionId: string, title: string): ChatSession | null {
+		const session = this.sessions.find((candidate) => candidate.id === sessionId);
+		if (!session) return null;
+		session.title = title;
+		this.persist();
+		return toSnapshot(session);
+	}
+
 	appendEntry(sessionId: string, entry: ChatTranscriptEntry): ChatSession | null {
 		const session = this.sessions.find((candidate) => candidate.id === sessionId);
 		if (!session) return null;
 		session.transcript.push(entry);
-		if (session.title === "New Chat" && entry.role === "user" && entry.visibility === "visible") {
-			session.title = deriveTitleFromContent(entry.content);
-		}
 		this.persist();
 		return toSnapshot(session);
 	}
