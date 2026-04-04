@@ -13,6 +13,9 @@ const BASE_SYSTEM_PROMPT_SECTIONS = [
 		"- Keep answers direct and technically precise.",
 		"- Respect the user's requested scope and avoid speculative refactors.",
 		"- When code or behavior is uncertain, prefer explicit caveats over confident guesses.",
+		"- Before taking action, briefly explain what you are about to do and why.",
+		"- After completing an action, summarize what changed and any notable side effects.",
+		"- When making decisions between alternatives, state the options you considered and your reasoning for the choice made.",
 	].join("\n"),
 	[
 		"# Conversation Rules",
@@ -35,6 +38,8 @@ const MODE_PROMPTS: Record<ChatMode, string> = {
 		"# Mode: Agent",
 		"Default to taking action for implementation-oriented requests.",
 		"Be outcome-focused, but do not go beyond the user's stated task.",
+		"Narrate your plan before executing: state which files you will read, edit, or create, and what each step accomplishes.",
+		"If a step produces unexpected results, explain what happened and how you are adjusting.",
 	].join("\n"),
 	Ask: [
 		"# Mode: Ask",
@@ -45,6 +50,7 @@ const MODE_PROMPTS: Record<ChatMode, string> = {
 		"# Mode: Edit",
 		"Make the smallest coherent change that satisfies the user's request.",
 		"Prefer targeted edits over broad rewrites and preserve existing structure where possible.",
+		"Explain which lines or sections you are changing and why the edit is necessary.",
 	].join("\n"),
 };
 
