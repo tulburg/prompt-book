@@ -594,34 +594,55 @@ export function ChatPanel({
                 No past sessions
               </div>
             ) : (
-              chatService.historySessions.map((session) => (
-                <button
-                  key={session.id}
-                  className="flex w-full cursor-pointer flex-col gap-0.5 border-none bg-transparent px-3 py-2 text-left hover:bg-border-500"
-                  onClick={() => {
-                    chatService.restoreSession(session.id);
-                    activeSessionIdRef.current = session.id;
-                    setActiveSession(chatService.activeSession);
-                    setSessions([...chatService.sessions]);
-                    setShowHistory(false);
-                  }}
-                >
-                  <span className="truncate text-xs font-medium text-foreground">
-                    {session.title}
-                  </span>
-                  <span className="text-[10px] text-foreground-900">
-                    {new Date(session.closedAt!).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}{" "}
-                    &middot;{" "}
-                    {new Date(session.closedAt!).toLocaleTimeString(undefined, {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </button>
-              ))
+              (() => {
+                const today = new Date();
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+                const startOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).getTime();
+
+                let lastLabel = "";
+                return chatService.historySessions.map((session) => {
+                  const ts = session.closedAt!;
+                  let label: string;
+                  if (ts >= startOfToday) label = "Today";
+                  else if (ts >= startOfYesterday) label = "Yesterday";
+                  else label = new Date(ts).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+
+                  const showLabel = label !== lastLabel;
+                  lastLabel = label;
+
+                  return (
+                    <React.Fragment key={session.id}>
+                      {showLabel && (
+                        <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-foreground-900">
+                          {label}
+                        </div>
+                      )}
+                      <button
+                        className="flex w-full cursor-pointer flex-col gap-0.5 border-none bg-transparent px-3 py-2 text-left hover:bg-border-500"
+                        onClick={() => {
+                          chatService.restoreSession(session.id);
+                          activeSessionIdRef.current = session.id;
+                          setActiveSession(chatService.activeSession);
+                          setSessions([...chatService.sessions]);
+                          setShowHistory(false);
+                        }}
+                      >
+                        <span className="truncate text-xs font-medium text-foreground">
+                          {session.title}
+                        </span>
+                        <span className="text-[10px] text-foreground-900">
+                          {new Date(ts).toLocaleTimeString(undefined, {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </button>
+                    </React.Fragment>
+                  );
+                });
+              })()
             )}
           </div>
         </div>
