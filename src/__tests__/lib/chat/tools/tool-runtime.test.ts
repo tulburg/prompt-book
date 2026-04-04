@@ -227,7 +227,13 @@ function installWindowStubs(files: FileMap) {
 					};
 				}
 				if (channel === "chat-tools:run-command") {
-					return { stdout: "", stderr: "", exitCode: 0, cwd: "/workspace", status: "completed" };
+					return {
+						stdout: "",
+						stderr: "",
+						exitCode: 0,
+						cwd: typeof payload?.cwd === "string" ? payload.cwd : "/unexpected",
+						status: "completed",
+					};
 				}
 				throw new Error(`Unexpected IPC channel: ${channel}`);
 			}),
@@ -286,6 +292,27 @@ describe("tool runtime", () => {
 		await expect(
 			context.editFile("/workspace/file.txt", "line 2", "updated line 2"),
 		).rejects.toThrow("File has not been read fully yet.");
+	});
+
+	it("defaults shell commands to the restored project root", async () => {
+		const files = new Map<string, string>();
+		const context = await makeContext(files);
+
+		const result = await context.runCommand({
+			command: "ls",
+			description: "List files",
+		});
+
+		expect(result.cwd).toBe("/workspace");
+	});
+
+	it("returns a friendly error when a block does not exist", async () => {
+		const files = new Map<string, string>();
+		const context = await makeContext(files);
+
+		await expect(context.readBlock("backend-api")).rejects.toThrow(
+			'Block not found: backend-api. Call Block with action "list" to inspect existing blocks, or Block with action "write" to create it.',
+		);
 	});
 
 	it("supports inserting and deleting notebook cells by id", async () => {

@@ -610,8 +610,17 @@ export function registerChatToolHandlers() {
 			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
 			const blockId = normalizeBlockId(payload.blockId ?? "");
 			const schemaPath = path.join(getBlocksDir(workspaceRoots), blockId, "block.json");
-			const content = await fs.readFile(schemaPath, "utf8");
-			return parseBlockSchema(blockId, schemaPath, content);
+			try {
+				const content = await fs.readFile(schemaPath, "utf8");
+				return parseBlockSchema(blockId, schemaPath, content);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+					throw new Error(
+						`Block not found: ${blockId}. Call Block with action "list" to inspect existing blocks, or Block with action "write" to create it.`,
+					);
+				}
+				throw error;
+			}
 		},
 	);
 

@@ -485,7 +485,15 @@ export class ChatService {
 					assistantToolCalls,
 					toolContext,
 				);
-				console.log(`[ChatService] Tool execution done (iteration ${iteration + 1}), results:`, executed.map((e) => ({ tool: e.call.name, isError: e.result.isError, contentLen: e.result.content.length })));
+				console.log(
+					`[ChatService] Tool execution done (iteration ${iteration + 1}), results:`,
+					executed.map((e) => ({
+						tool: e.call.name,
+						isError: e.result.isError,
+						contentLen: e.result.content.length,
+						contentPreview: e.result.isError ? e.result.content.slice(0, 300) : undefined,
+					})),
+				);
 				let shouldPauseAfterTools = false;
 				for (const item of executed) {
 					this.commitEntry(

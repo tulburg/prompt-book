@@ -533,7 +533,11 @@ export function createToolContext(options: {
 				};
 			},
 			async runCommand(input) {
-				const result = await window.ipcRenderer.invoke("chat-tools:run-command", input) as {
+				const cwd = input.cwd ?? workspaceRoots[0] ?? "/";
+				const result = await window.ipcRenderer.invoke("chat-tools:run-command", {
+					...input,
+					cwd,
+				}) as {
 					stdout?: string;
 					stderr?: string;
 					exitCode?: number | null;
@@ -546,7 +550,7 @@ export function createToolContext(options: {
 					stdout: result.stdout ?? "",
 					stderr: result.stderr ?? "",
 					exitCode: result.exitCode ?? null,
-					cwd: result.cwd ?? input.cwd ?? workspaceRoots[0] ?? "/",
+					cwd: result.cwd ?? cwd,
 					status: result.status,
 					backgroundTaskId: result.backgroundTaskId,
 					outputPath: result.outputPath,
@@ -675,27 +679,36 @@ export function createToolContext(options: {
 				return result.items ?? [];
 			},
 			async readBlock(blockId) {
-				const result = await window.ipcRenderer.invoke("chat-tools:block-read", {
-					blockId,
-					workspaceRoots,
-				}) as {
-					id?: string;
-					title?: string;
-					definition?: string;
-					schemaPath?: string;
-					diagramPath?: string;
-					contextPath?: string;
-					files?: string[];
-				};
-				return {
-					id: result.id ?? blockId,
-					title: result.title ?? blockId,
-					definition: result.definition ?? "",
-					schemaPath: result.schemaPath ?? blockId,
-					diagramPath: result.diagramPath ?? "",
-					contextPath: result.contextPath ?? "",
-					files: result.files ?? [],
-				};
+				try {
+					const result = await window.ipcRenderer.invoke("chat-tools:block-read", {
+						blockId,
+						workspaceRoots,
+					}) as {
+						id?: string;
+						title?: string;
+						definition?: string;
+						schemaPath?: string;
+						diagramPath?: string;
+						contextPath?: string;
+						files?: string[];
+					};
+					return {
+						id: result.id ?? blockId,
+						title: result.title ?? blockId,
+						definition: result.definition ?? "",
+						schemaPath: result.schemaPath ?? blockId,
+						diagramPath: result.diagramPath ?? "",
+						contextPath: result.contextPath ?? "",
+						files: result.files ?? [],
+					};
+				} catch (error) {
+					if (isMissingFileError(error)) {
+						throw new Error(
+							`Block not found: ${blockId}. Call Block with action "list" to inspect existing blocks, or Block with action "write" to create it.`,
+						);
+					}
+					throw error;
+				}
 			},
 			async writeBlock(input) {
 				const result = await window.ipcRenderer.invoke("chat-tools:block-write", {

@@ -33,6 +33,8 @@ function buildBlockPolicyLines(tools: ChatToolDefinition[]): string[] {
 
 	return [
 		"- Use `Block` when block-level architecture or grouped file ownership is relevant. It is not always mandatory at the start.",
+		"- CRITICAL: Before using `Block` with `read`, `read_context`, `read_diagram`, or `read_files`, call `Block` with `action: \"list\"` unless the block was already returned earlier in the session.",
+		"- Never guess or invent block ids for read operations. If a needed block is missing, create it with `Block` and `action: \"write\"`.",
 		"- Default to coarse-grained blocks around major subsystems or workflows. Only split into finer-grained blocks when a coarse block would be too broad to stay useful.",
 		"- CRITICAL: After you make project changes, update at least 1 affected block with `Block` and `action: \"write\"` before finishing.",
 		"- Updating a block means keeping its title, definition, files list, linked context, and diagram current. Update the diagram when the block flow changed.",

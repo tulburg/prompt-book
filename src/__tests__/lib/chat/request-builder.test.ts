@@ -291,9 +291,12 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("automatically create any missing context");
 		expect(request.system.join("\n")).toContain("automatically create any missing block");
 		expect(request.system.join("\n")).toContain("do not ask the user for permission to create or update context files");
+		expect(request.system.join("\n")).toContain("Before using `Block` with `read`, `read_context`, `read_diagram`, or `read_files`, call `Block` with `action: \"list\"`");
+		expect(request.system.join("\n")).toContain("Never guess or invent block ids for read operations");
 		expect(request.system.join("\n")).toContain("Default to coarse-grained blocks around major subsystems or workflows");
 		expect(request.system.join("\n")).toContain("do not ask the user for permission or granularity preferences");
 		expect(request.system.join("\n")).toContain("not automatically in the current repository");
+		expect(request.tools?.some((tool) => tool.function.name === "Block" && String(tool.function.description).includes("Use write to create a missing block"))).toBe(true);
 		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 

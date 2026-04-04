@@ -31,6 +31,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 	description: [
 		"List, inspect, and update project blocks stored in .odex/blocks.",
 		"Blocks describe a component group with its definition, files, diagram, and linked context.",
+		"Use write to create a missing block; do not use read actions for blocks that are not listed yet.",
 		"After project modifications, update at least one affected block.",
 	].join(" "),
 	inputSchema: {
@@ -39,11 +40,11 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 			action: {
 				type: "string",
 				enum: ["list", "read", "read_context", "read_diagram", "read_files", "write"],
-				description: "Which block operation to perform.",
+				description: 'Which block operation to perform. Use "list" before reads. Use "write" to create or update blocks.',
 			},
 			block_id: {
 				type: "string",
-				description: "Block identifier, usually the block folder name under .odex/blocks.",
+				description: 'Block identifier, usually the block folder name under .odex/blocks. For new blocks, provide the desired id with action "write".',
 			},
 			title: {
 				type: "string",
@@ -103,7 +104,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 		if (action === "list") {
 			const items = await context.listBlocks();
 			if (items.length === 0) {
-				return textResult("No blocks found in .odex/blocks.", {
+				return textResult('No blocks found in .odex/blocks. Use Block with action "write" to create the first block.', {
 					kind: "file_list",
 					title: ".odex/blocks",
 					subtitle: "0 blocks",
@@ -151,31 +152,32 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 			});
 		}
 
-		const block = await context.readBlock(blockId);
+		if (action === "read_context" || action === "read_diagram" || action === "read_files") {
+			const block = await context.readBlock(blockId);
 
-		if (action === "read_context") {
-			const result = await context.readFile(block.contextPath);
-			return textResult(formatNumberedContent(result.content, result.startLine), {
-				kind: "input_output",
-				title: `${block.id} context`,
-				subtitle: block.contextPath,
-				input: JSON.stringify({ action, block_id: blockId }, null, 2),
-				output: formatNumberedContent(result.content, result.startLine),
-			});
-		}
+			if (action === "read_context") {
+				const result = await context.readFile(block.contextPath);
+				return textResult(formatNumberedContent(result.content, result.startLine), {
+					kind: "input_output",
+					title: `${block.id} context`,
+					subtitle: block.contextPath,
+					input: JSON.stringify({ action, block_id: blockId }, null, 2),
+					output: formatNumberedContent(result.content, result.startLine),
+				});
+			}
 
-		if (action === "read_diagram") {
-			const result = await context.readFile(block.diagramPath);
-			return textResult(formatNumberedContent(result.content, result.startLine), {
-				kind: "input_output",
-				title: `${block.id} diagram`,
-				subtitle: block.diagramPath,
-				input: JSON.stringify({ action, block_id: blockId }, null, 2),
-				output: formatNumberedContent(result.content, result.startLine),
-			});
-		}
+			if (action === "read_diagram") {
+				const result = await context.readFile(block.diagramPath);
+				return textResult(formatNumberedContent(result.content, result.startLine), {
+					kind: "input_output",
+					title: `${block.id} diagram`,
+					subtitle: block.diagramPath,
+					input: JSON.stringify({ action, block_id: blockId }, null, 2),
+					output: formatNumberedContent(result.content, result.startLine),
+				});
+			}
 
-		if (action === "read_files") {
+			// action === "read_files"
 			const contents = await Promise.all(
 				block.files.map(async (filePath) => {
 					const result = await context.readFile(filePath);
