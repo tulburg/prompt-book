@@ -267,18 +267,18 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 									return n ?? { x: 0, y: 0, width: 180, height: 50 };
 								})();
 
-					const startX = fromNode.x + fromNode.width;
-					const startY = fromNode.y + fromNode.height / 2;
-					const endX = toNode.x;
-					const endY = toNode.y + toNode.height / 2;
-					const midX = (startX + endX) / 2;
+					const startX = fromNode.x + fromNode.width / 2;
+					const startY = fromNode.y + fromNode.height;
+					const endX = toNode.x + toNode.width / 2;
+					const endY = toNode.y;
+					const midY = (startY + endY) / 2;
 
 					return {
 						...edge,
 						points: [
 							{ x: startX, y: startY },
-							{ x: midX, y: startY },
-							{ x: midX, y: endY },
+							{ x: startX, y: midY },
+							{ x: endX, y: midY },
 							{ x: endX, y: endY },
 						],
 					};
@@ -428,14 +428,15 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 					</div>
 				</div>
 
-				{/* Zoom controls */}
-				<ZoomControls
-					zoom={zoom}
-					onZoomIn={zoomIn}
-					onZoomOut={zoomOut}
-					onReset={resetZoom}
-				/>
 			</div>
+
+			{/* Zoom controls — fixed over the canvas */}
+			<ZoomControls
+				zoom={zoom}
+				onZoomIn={zoomIn}
+				onZoomOut={zoomOut}
+				onReset={resetZoom}
+			/>
 		</div>,
 		document.body,
 	);

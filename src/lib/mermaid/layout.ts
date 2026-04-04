@@ -64,7 +64,7 @@ export function layoutGraph(graph: MermaidGraph): LayoutResult {
 		layers.get(l)!.push(id);
 	}
 
-	// Position nodes left-to-right
+	// Position nodes top-to-bottom
 	const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
 	const layoutNodes: LayoutNode[] = [];
 	const positions = new Map<string, { x: number; y: number }>();
@@ -73,11 +73,11 @@ export function layoutGraph(graph: MermaidGraph): LayoutResult {
 
 	for (const layerIdx of sortedLayers) {
 		const nodesInLayer = layers.get(layerIdx)!;
-		const x = PADDING + layerIdx * (NODE_WIDTH + HORIZONTAL_GAP);
+		const y = PADDING + layerIdx * (NODE_HEIGHT + VERTICAL_GAP);
 
 		for (let i = 0; i < nodesInLayer.length; i++) {
 			const nodeId = nodesInLayer[i];
-			const y = PADDING + i * (NODE_HEIGHT + VERTICAL_GAP);
+			const x = PADDING + i * (NODE_WIDTH + HORIZONTAL_GAP);
 			positions.set(nodeId, { x, y });
 
 			const node = nodeMap.get(nodeId)!;
@@ -91,7 +91,7 @@ export function layoutGraph(graph: MermaidGraph): LayoutResult {
 		}
 	}
 
-	// Create edges with connection points
+	// Create edges with connection points (top-to-bottom)
 	const layoutEdges: LayoutEdge[] = graph.edges.map((edge) => {
 		const fromPos = positions.get(edge.from);
 		const toPos = positions.get(edge.to);
@@ -100,29 +100,29 @@ export function layoutGraph(graph: MermaidGraph): LayoutResult {
 			return { ...edge, points: [] };
 		}
 
-		const startX = fromPos.x + NODE_WIDTH;
-		const startY = fromPos.y + NODE_HEIGHT / 2;
-		const endX = toPos.x;
-		const endY = toPos.y + NODE_HEIGHT / 2;
+		const startX = fromPos.x + NODE_WIDTH / 2;
+		const startY = fromPos.y + NODE_HEIGHT;
+		const endX = toPos.x + NODE_WIDTH / 2;
+		const endY = toPos.y;
 
-		const midX = (startX + endX) / 2;
+		const midY = (startY + endY) / 2;
 
 		return {
 			...edge,
 			points: [
 				{ x: startX, y: startY },
-				{ x: midX, y: startY },
-				{ x: midX, y: endY },
+				{ x: startX, y: midY },
+				{ x: endX, y: midY },
 				{ x: endX, y: endY },
 			],
 		};
 	});
 
-	const totalWidth =
-		PADDING * 2 + sortedLayers.length * (NODE_WIDTH + HORIZONTAL_GAP) - HORIZONTAL_GAP;
 	const maxNodesInLayer = Math.max(...Array.from(layers.values()).map((l) => l.length));
+	const totalWidth =
+		PADDING * 2 + maxNodesInLayer * (NODE_WIDTH + HORIZONTAL_GAP) - HORIZONTAL_GAP;
 	const totalHeight =
-		PADDING * 2 + maxNodesInLayer * (NODE_HEIGHT + VERTICAL_GAP) - VERTICAL_GAP;
+		PADDING * 2 + sortedLayers.length * (NODE_HEIGHT + VERTICAL_GAP) - VERTICAL_GAP;
 
 	return {
 		nodes: layoutNodes,
