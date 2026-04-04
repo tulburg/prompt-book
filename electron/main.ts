@@ -1,4 +1,4 @@
-import { Menu, app, BrowserWindow, screen } from "electron";
+import { Menu, app, BrowserWindow, screen, ipcMain } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -213,6 +213,42 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
 }
+
+let mermaidWin: BrowserWindow | null = null;
+
+function openMermaidWindow() {
+  if (mermaidWin && !mermaidWin.isDestroyed()) {
+    mermaidWin.focus();
+    return;
+  }
+
+  mermaidWin = new BrowserWindow({
+    width: 1100,
+    height: 750,
+    title: "Flow Viewer",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.mjs"),
+    },
+    titleBarStyle: "hiddenInset",
+  });
+
+  const viewParam = "?view=mermaid";
+  if (VITE_DEV_SERVER_URL) {
+    mermaidWin.loadURL(VITE_DEV_SERVER_URL + viewParam);
+  } else {
+    mermaidWin.loadFile(path.join(RENDERER_DIST, "index.html"), {
+      search: "view=mermaid",
+    });
+  }
+
+  mermaidWin.on("closed", () => {
+    mermaidWin = null;
+  });
+}
+
+ipcMain.handle("window:open-mermaid", () => {
+  openMermaidWindow();
+});
 
 app.on("before-quit", () => {
   saveWindowState();

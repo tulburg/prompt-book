@@ -112,7 +112,7 @@ export function Header() {
 					variant="ghost"
 					className="h-7 w-7"
 					aria-label="Open flow viewer"
-					onClick={() => Bus.emit("mermaid:open", undefined)}
+					onClick={() => (window as any).windowBridge?.openMermaidViewer()}
 				>
 					<Network className="h-4 w-4" />
 				</Button>

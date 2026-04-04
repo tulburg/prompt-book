@@ -1,16 +1,10 @@
 import * as React from "react";
-import { createPortal } from "react-dom";
-import { Minus, Plus, RotateCcw, X } from "lucide-react";
+import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Button } from "../lower/Button";
 import { parseMermaid } from "@/lib/mermaid/parser";
 import { layoutGraph } from "@/lib/mermaid/layout";
 import { DEFAULT_MERMAID_FLOW } from "@/lib/mermaid/default-flow";
 import type { LayoutNode, LayoutEdge } from "@/lib/mermaid/types";
-
-interface MermaidViewerProps {
-	open: boolean;
-	onClose: () => void;
-}
 
 interface DragState {
 	nodeId: string;
@@ -170,7 +164,7 @@ function ZoomControls({
 	);
 }
 
-export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
+function MermaidCanvas() {
 	const [nodes, setNodes] = React.useState<LayoutNode[]>([]);
 	const [edges, setEdges] = React.useState<LayoutEdge[]>([]);
 	const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
@@ -182,33 +176,12 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 	const didDragRef = React.useRef(false);
 
 	React.useEffect(() => {
-		if (!open) return;
-
 		const graph = parseMermaid(DEFAULT_MERMAID_FLOW);
 		const result = layoutGraph(graph);
 		setNodes(result.nodes);
 		setEdges(result.edges);
 		setCanvasSize({ width: result.width, height: result.height });
-		setSelectedNodeId(null);
-		setZoom(1);
-	}, [open]);
-
-	React.useEffect(() => {
-		if (!open) return;
-
-		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				if (selectedNodeId) {
-					setSelectedNodeId(null);
-				} else {
-					onClose();
-				}
-			}
-		};
-
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [open, onClose, selectedNodeId]);
+	}, []);
 
 	const handleNodeMouseDown = React.useCallback(
 		(nodeId: string, e: React.MouseEvent) => {
@@ -226,8 +199,6 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 	);
 
 	React.useEffect(() => {
-		if (!open) return;
-
 		const handleMouseMove = (e: MouseEvent) => {
 			if (!dragRef.current) return;
 
@@ -296,7 +267,7 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 			window.removeEventListener("mousemove", handleMouseMove);
 			window.removeEventListener("mouseup", handleMouseUp);
 		};
-	}, [open, zoom, nodes]);
+	}, [zoom, nodes]);
 
 	const handleWheel = React.useCallback((e: React.WheelEvent) => {
 		if (e.ctrlKey || e.metaKey) {
@@ -308,6 +279,16 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 	const handleNodeClick = React.useCallback((nodeId: string) => {
 		if (didDragRef.current) return;
 		setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+	}, []);
+
+	React.useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				setSelectedNodeId(null);
+			}
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, []);
 
 	const zoomIn = React.useCallback(() => {
@@ -325,34 +306,17 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 		}
 	}, []);
 
-	if (!open) return null;
-
 	const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
-	// Canvas should be at least the window size, or larger if content overflows
 	const scaledWidth = canvasSize.width * zoom;
 	const scaledHeight = canvasSize.height * zoom;
 
-	return createPortal(
-		<div className="fixed inset-0 z-[1200] flex flex-col bg-panel">
-			{/* Header bar */}
-			<div className="flex h-10 shrink-0 items-center justify-between border-b border-border-500 px-4">
-				<span className="text-sm font-medium text-foreground/85">Flow Viewer</span>
-				<Button
-					size="icon"
-					variant="ghost"
-					className="h-7 w-7"
-					aria-label="Close flow viewer"
-					onClick={onClose}
-				>
-					<X className="h-4 w-4" />
-				</Button>
-			</div>
-
-			{/* Canvas area — scrollable */}
+	return (
+		<div className="relative flex-1">
+			{/* Scrollable canvas */}
 			<div
 				ref={containerRef}
-				className="relative flex-1 overflow-auto"
+				className="absolute inset-0 overflow-auto"
 				onWheel={handleWheel}
 			>
 				<div
@@ -427,7 +391,6 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 						)}
 					</div>
 				</div>
-
 			</div>
 
 			{/* Zoom controls — fixed over the canvas */}
@@ -437,7 +400,23 @@ export function MermaidViewer({ open, onClose }: MermaidViewerProps) {
 				onZoomOut={zoomOut}
 				onReset={resetZoom}
 			/>
-		</div>,
-		document.body,
+		</div>
+	);
+}
+
+/** Standalone window component rendered when ?view=mermaid */
+export function MermaidViewerWindow() {
+	const isMac = navigator.platform.toUpperCase().includes("MAC");
+
+	return (
+		<div className="bg-panel flex h-screen w-screen flex-col">
+			{/* Draggable title bar area */}
+			<div
+				className={`flex h-10 shrink-0 items-center border-b border-border-500 px-4 ${isMac ? "electron-drag-region justify-center pl-20" : "justify-start"}`}
+			>
+				<span className="text-sm font-medium text-foreground/85">Flow Viewer</span>
+			</div>
+			<MermaidCanvas />
+		</div>
 	);
 }

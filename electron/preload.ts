@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld("nativeContextMenu", {
 })
 
 contextBridge.exposeInMainWorld("windowBridge", {
+  openMermaidViewer: () => ipcRenderer.invoke("window:open-mermaid"),
   openAgent: (prompt: string) =>
     ipcRenderer.invoke("window:open-agent", { prompt }),
 })

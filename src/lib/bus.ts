@@ -1,7 +1,6 @@
 interface EventDataMap {
   "settings:open": void;
   "sidebar:toggle": void;
-  "mermaid:open": void;
 }
 
 type EventName = keyof EventDataMap;
