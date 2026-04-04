@@ -7,7 +7,7 @@ type ContextToolInput = JsonObject & {
 	filename?: string;
 	title?: string;
 	description?: string;
-	paragraph?: string;
+	content_body?: string;
 };
 
 export const contextTool: ChatToolDefinition<ContextToolInput> = {
@@ -16,9 +16,11 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 	category: "filesystem",
 	uiKind: "file_list",
 	description: [
-		"List, read, and write persistent project context records.",
+		"List, read, and write persistent project context pointers.",
+		"A context is a point-by-point mirror of its block, feature, or entity: concise pointers to where things are and what they do, not a chronological log.",
 		"Context files live in .odex/context under the current project.",
 		"Use list before execution, read at least one relevant context, and write back after major changes.",
+		"On write, supply the full replacement body; previous content is overwritten, not appended.",
 		"Use write to create a missing context; do not use read for contexts that are not listed yet.",
 	].join(" "),
 	inputSchema: {
@@ -41,9 +43,9 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 				type: "string",
 				description: "Short context description. Required when creating a new context and optional when updating one.",
 			},
-			paragraph: {
+			content_body: {
 				type: "string",
-				description: "Paragraph to append for future context. Required for write.",
+				description: "Full replacement body for the context map. Point-by-point pointers describing where things are and what they do. Overwrites previous content. Required for write.",
 			},
 		},
 		required: ["action"],
@@ -107,18 +109,18 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 
 		if (action === "write") {
 			const filename = coerceString(input.filename);
-			const paragraph = coerceString(input.paragraph);
+			const contentBody = coerceString(input.content_body);
 			if (!filename) {
 				return errorResult("Context write requires filename.");
 			}
-			if (!paragraph.trim()) {
-				return errorResult("Context write requires paragraph.");
+			if (!contentBody.trim()) {
+				return errorResult("Context write requires content_body.");
 			}
 			const result = await context.writeContext({
 				filename,
 				title: coerceString(input.title) || undefined,
 				description: coerceString(input.description) || undefined,
-				paragraph,
+				contentBody,
 			});
 			return textResult(
 				`${result.action === "created" ? "Created" : "Updated"} context ${result.filename}.`,
@@ -132,7 +134,7 @@ export const contextTool: ChatToolDefinition<ContextToolInput> = {
 							filename,
 							title: input.title,
 							description: input.description,
-							paragraph,
+							content_body: contentBody,
 						},
 						null,
 						2,

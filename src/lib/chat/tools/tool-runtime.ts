@@ -560,7 +560,10 @@ export function createToolContext(options: {
 				};
 			},
 			async runCommand(input) {
-				const cwd = input.cwd ?? workspaceRoots[0] ?? "/";
+				const cwd = input.cwd ?? workspaceRoots[0];
+				if (!cwd) {
+					throw new Error("No workspace is open. Open a project before running commands.");
+				}
 				const result = await window.ipcRenderer.invoke("chat-tools:run-command", {
 					...input,
 					cwd,
@@ -669,7 +672,10 @@ export function createToolContext(options: {
 			},
 			async writeContext(input) {
 				const result = await window.ipcRenderer.invoke("chat-tools:context-write", {
-					...input,
+					filename: input.filename,
+					title: input.title,
+					description: input.description,
+					contentBody: input.contentBody,
 					workspaceRoots,
 				}) as {
 					filename?: string;

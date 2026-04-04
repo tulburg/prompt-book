@@ -59,3 +59,34 @@ Place every test file inside a `__tests__/` directory, mirroring the source tree
 ```
 
 Use the nearest shared `__tests__/` directory for that source tree, such as `src/__tests__/...` for app code and `electron/__tests__/...` for Electron code.
+
+### Do not add tests that only validate hardcoded implementation details
+Avoid tests whose main value is re-asserting static implementation data that already lives in the codebase: prompt copy, tool instructions, tool descriptions, registry contents, model-profile lookups, stop tokens, section headings, canned error text, or other hardcoded constants. Also avoid runtime-style tests that recreate our own internal tool context, IPC mocks, file system mocks, or orchestration layers just to validate code paths we already control.
+
+**Wrong** — simulating the runtime only to re-assert our own control flow:
+```ts
+it("defaults shell commands to the restored project root", async () => {
+  const context = await makeFakeRuntimeContext();
+  const result = await context.runCommand({ command: "ls" });
+  expect(result.cwd).toBe("/workspace");
+});
+```
+
+**Wrong** — checking hardcoded copy or static inventory text:
+```ts
+it("includes the Block tool description", () => {
+  expect(request.tools?.some((tool) =>
+    tool.function.description?.includes("project feature or workflow")
+  )).toBe(true);
+});
+```
+
+**Right** — testing a feature that needs simulation to prove a real expected result:
+```ts
+it("shows a friendly error when the provider returns malformed tool output", async () => {
+  mockProviderResponse("{not valid json}");
+  await expect(runChatTurn()).rejects.toThrow("Malformed tool output");
+});
+```
+
+The exception is when the test proves behavior at a meaningful boundary, such as provider request/response handling, parsing streamed output, cross-process behavior, or a user-visible failure mode. If the assertion mostly says a hardcoded value still equals itself, delete the test or rewrite it to verify the external behavior that actually matters.

@@ -171,6 +171,7 @@ function trackOdexMetadataWrites(
 		}
 		if (item.call.name === "Block" && action === "write") {
 			state.blockWritten = true;
+			state.contextWritten = true;
 		}
 	}
 }

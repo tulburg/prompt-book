@@ -667,6 +667,76 @@ function getBlockActionSummary(input: JsonObject): string | null {
   }
 }
 
+function getToolWriteResultAction(
+  result:
+    | {
+        display?: ChatToolDisplay;
+        isError?: boolean;
+        outputText: string;
+      }
+    | undefined,
+): "created" | "updated" | null {
+  if (!result || result.isError) {
+    return null;
+  }
+  if (result.display?.kind === "json") {
+    const value = result.display.value;
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      "action" in value &&
+      (value.action === "created" || value.action === "updated")
+    ) {
+      return value.action;
+    }
+  }
+  if (result.display?.kind === "input_output") {
+    const subtitle = result.display.subtitle?.toLowerCase() ?? "";
+    if (subtitle.startsWith("created")) {
+      return "created";
+    }
+    if (subtitle.startsWith("updated")) {
+      return "updated";
+    }
+  }
+  if (/^created\b/i.test(result.outputText)) {
+    return "created";
+  }
+  if (/^updated\b/i.test(result.outputText)) {
+    return "updated";
+  }
+  return null;
+}
+
+function getContextActionSummary(
+  input: JsonObject,
+  resultAction: "created" | "updated" | null = null,
+): string | null {
+  const action = typeof input.action === "string" ? input.action : "";
+  const filename = typeof input.filename === "string" ? input.filename : "";
+  if (!action) {
+    return filename || null;
+  }
+
+  switch (action) {
+    case "list":
+      return "List Contexts";
+    case "read":
+      return filename ? `Read Context: ${filename}` : "Read Context";
+    case "write":
+      if (resultAction === "created") {
+        return filename ? `Create Context: ${filename}` : "Create Context";
+      }
+      if (resultAction === "updated") {
+        return filename ? `Update Context: ${filename}` : "Update Context";
+      }
+      return filename ? `Write Context: ${filename}` : "Write Context";
+    default:
+      return filename ? `Context: ${filename}` : "Context";
+  }
+}
+
 function buildToolAction(
   toolName: string,
   input: JsonObject,
@@ -685,6 +755,38 @@ function buildToolAction(
   const isError = result?.isError;
 
   switch (toolName) {
+    case "Context": {
+      const summary =
+        getContextActionSummary(input, getToolWriteResultAction(result)) ??
+        "Context";
+      const label = isRunning ? (
+        <span className="tool-title-shimmer">{summary}</span>
+      ) : (
+        <span>{summary}</span>
+      );
+
+      let preview: React.ReactNode = null;
+      if (display?.kind === "input_output" && display.output) {
+        preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="collapsed"
+            hasExternalToggle
+            peekMaxHeight={120}
+          >
+            {(maxH) => <MonacoCodeView value={display.output!} maxHeight={maxH} />}
+          </PreviewBox>
+        );
+      }
+
+      return {
+        icon: isRunning ? <SpinnerIcon /> : getToolIcon("Context"),
+        label,
+        preview,
+        previewStateKey: preview ? stateKey : undefined,
+      };
+    }
+
     case "Read": {
       const fileName =
         display?.kind === "input_output"
@@ -1173,7 +1275,21 @@ function buildToolAction(
     }
 
     case "Block": {
-      const summary = getBlockActionSummary(input) ?? "Block";
+      const resultAction = getToolWriteResultAction(result);
+      const summary =
+        typeof input.action === "string" && input.action === "write"
+          ? (() => {
+              const blockId =
+                typeof input.block_id === "string" ? input.block_id : "";
+              if (resultAction === "created") {
+                return blockId ? `Create Block: ${blockId}` : "Create Block";
+              }
+              if (resultAction === "updated") {
+                return blockId ? `Update Block: ${blockId}` : "Update Block";
+              }
+              return getBlockActionSummary(input) ?? "Block";
+            })()
+          : getBlockActionSummary(input) ?? "Block";
       const label = isRunning ? (
         <span className="tool-title-shimmer">{summary}</span>
       ) : (

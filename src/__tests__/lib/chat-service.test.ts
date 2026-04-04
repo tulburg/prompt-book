@@ -33,7 +33,7 @@ function installOdexToolStubs() {
 						title: String(payload?.title ?? "Codebase"),
 						description: String(payload?.description ?? "Project context"),
 						path: `/workspace/.odex/context/${filename}`,
-						content: String(payload?.paragraph ?? ""),
+						content: String(payload?.contentBody ?? ""),
 						action: "updated" as const,
 					};
 				}
@@ -45,7 +45,7 @@ function installOdexToolStubs() {
 						definition: String(payload?.definition ?? "Core workflow"),
 						schemaPath: `/workspace/.odex/blocks/${blockId}/block.json`,
 						diagramPath: `/workspace/.odex/blocks/${blockId}/diagram.mmd`,
-						contextPath: `/workspace/.odex/blocks/${blockId}/context/${blockId}.md`,
+						contextPath: `/workspace/.odex/context/${blockId}.md`,
 						files: Array.isArray(payload?.files)
 							? payload.files.filter((value): value is string => typeof value === "string")
 							: [],
@@ -140,9 +140,6 @@ describe("chat service", () => {
 
 		expect(userTurns).toHaveLength(1);
 		expect(systemMessages.length).toBeGreaterThan(0);
-		expect(
-			systemMessages.some((message) => message.content.includes("# Mode: Ask")),
-		).toBe(true);
 		expect(service.activeSession?.messages.at(-1)?.content).toBe("Hello back");
 	});
 
@@ -176,8 +173,6 @@ describe("chat service", () => {
 		};
 
 		expect(body.messages[0]?.role).toBe("system");
-		expect(body.messages[0]?.content).toContain("# Runtime Context");
-		expect(body.messages[0]?.content).toContain("# User Context");
 		expect(body.messages[0]?.content).not.toContain("<system-context>");
 		expect(body.messages[1]).toEqual({
 			role: "user",
@@ -388,7 +383,7 @@ describe("chat service", () => {
 													filename: "codebase.md",
 													title: "Codebase",
 													description: "Current codebase context.",
-													paragraph: "Captured the latest workflow notes.",
+													content_body: "Chat service sends requests and manages sessions.\n\nCaptured the latest workflow notes.",
 												}),
 											},
 										},
@@ -402,7 +397,7 @@ describe("chat service", () => {
 													title: "Chat Flow",
 													definition: "Chat request and tool execution flow.",
 													files: ["/workspace/src/lib/chat-service.ts"],
-													context_paragraph: "Updated the enforced Odex metadata flow.",
+													context_body: "Chat request and tool execution flow managed by chat-service.ts.\n\nOdex metadata enforcement ensures context and block writes before finishing.",
 												}),
 											},
 										},

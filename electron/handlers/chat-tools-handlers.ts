@@ -143,7 +143,11 @@ function normalizeGlobPattern(pattern: string): string {
 }
 
 function resolveSearchPath(requestedPath: string | undefined, workspaceRoots: string[]): string {
-	return path.resolve(requestedPath || workspaceRoots[0] || process.cwd());
+	const base = requestedPath || workspaceRoots[0];
+	if (!base) {
+		throw new Error("No workspace is open. Open a project before searching.");
+	}
+	return path.resolve(base);
 }
 
 function isRipgrepNoMatchError(error: unknown): boolean {
@@ -221,10 +225,6 @@ function getBlocksDir(workspaceRoots: string[]): string {
 		throw new Error("Block tool requires an open workspace.");
 	}
 	return path.join(workspaceRoot, ".odex", "blocks");
-}
-
-function getBlockContextDir(blockDir: string): string {
-	return path.join(blockDir, "context");
 }
 
 async function readExistingContextFile(
@@ -512,15 +512,15 @@ export function registerChatToolHandlers() {
 				filename?: string;
 				title?: string;
 				description?: string;
-				paragraph?: string;
+				contentBody?: string;
 				workspaceRoots?: string[];
 			},
 		) => {
 			const workspaceRoots = Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [];
 			const filename = normalizeContextFilename(payload.filename ?? "");
-			const paragraph = typeof payload.paragraph === "string" ? payload.paragraph.trim() : "";
-			if (!paragraph) {
-				throw new Error("Context writes require a non-empty paragraph.");
+			const contentBody = typeof payload.contentBody === "string" ? payload.contentBody.trim() : "";
+			if (!contentBody) {
+				throw new Error("Context writes require a non-empty content_body.");
 			}
 
 			const contextDir = getContextDir(workspaceRoots);
@@ -542,11 +542,14 @@ export function registerChatToolHandlers() {
 			}
 
 			await fs.mkdir(contextDir, { recursive: true });
-			const timestampedParagraph = `[${new Date().toISOString()}] ${paragraph}`;
+			const pointers = contentBody
+				.split(/\n{2,}/)
+				.map((entry) => entry.trim())
+				.filter(Boolean);
 			const content = serializeContextMarkdown({
 				title: nextTitle,
 				description: nextDescription,
-				paragraphs: [...(existing?.paragraphs ?? []), timestampedParagraph],
+				pointers,
 			});
 			await fs.writeFile(filePath, content, "utf8");
 
@@ -642,7 +645,7 @@ export function registerChatToolHandlers() {
 				contextFilename?: string;
 				contextTitle?: string;
 				contextDescription?: string;
-				contextParagraph?: string;
+				contextBody?: string;
 				workspaceRoots?: string[];
 			},
 		) => {
@@ -671,7 +674,7 @@ export function registerChatToolHandlers() {
 				throw new Error("Block writes require a definition.");
 			}
 
-			const contextDir = getBlockContextDir(blockDir);
+			const contextDir = getContextDir(workspaceRoots);
 			const nextContextFilename = typeof payload.contextFilename === "string" && payload.contextFilename.trim()
 				? normalizeContextFilename(payload.contextFilename)
 				: existing?.contextPath
@@ -683,10 +686,10 @@ export function registerChatToolHandlers() {
 				(existing?.contextPath && existing.contextPath !== nextContextPath
 					? await readExistingContextFile(existing.contextPath, path.basename(existing.contextPath))
 					: null);
-			const contextParagraph =
-				typeof payload.contextParagraph === "string" ? payload.contextParagraph.trim() : "";
-			if (!contextParagraph) {
-				throw new Error("Block writes require a non-empty context paragraph.");
+			const contextBody =
+				typeof payload.contextBody === "string" ? payload.contextBody.trim() : "";
+			if (!contextBody) {
+				throw new Error("Block writes require a non-empty context body.");
 			}
 			const nextContextTitle = typeof payload.contextTitle === "string" && payload.contextTitle.trim()
 				? payload.contextTitle.trim()
@@ -724,11 +727,14 @@ export function registerChatToolHandlers() {
 			await fs.mkdir(contextDir, { recursive: true });
 			await fs.writeFile(diagramPath, `${diagramContent.replace(/\r\n/g, "\n").trim()}\n`, "utf8");
 
-			const timestampedParagraph = `[${new Date().toISOString()}] ${contextParagraph}`;
+			const contextPointers = contextBody
+				.split(/\n{2,}/)
+				.map((entry) => entry.trim())
+				.filter(Boolean);
 			const contextContent = serializeContextMarkdown({
 				title: nextContextTitle,
 				description: nextContextDescription,
-				paragraphs: [...(existingContext?.paragraphs ?? []), timestampedParagraph],
+				pointers: contextPointers,
 			});
 			await fs.writeFile(nextContextPath, contextContent, "utf8");
 
@@ -766,7 +772,10 @@ export function registerChatToolHandlers() {
 				description?: string;
 			},
 		) => {
-			const cwd = payload.cwd || process.cwd();
+			if (!payload.cwd) {
+				throw new Error("No working directory specified and no workspace is open.");
+			}
+			const cwd = payload.cwd;
 			if (payload.runInBackground) {
 				const taskId = createTaskId();
 				const outputPath = path.join(getBackgroundTaskDir(), `${taskId}.log`);

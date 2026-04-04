@@ -301,7 +301,7 @@ export interface ChatToolContext {
 		filename: string;
 		title?: string;
 		description?: string;
-		paragraph: string;
+		contentBody: string;
 	}) => Promise<{
 		filename: string;
 		title: string;
@@ -341,7 +341,7 @@ export interface ChatToolContext {
 		contextFilename?: string;
 		contextTitle?: string;
 		contextDescription?: string;
-		contextParagraph: string;
+		contextBody: string;
 	}) => Promise<{
 		id: string;
 		title: string;

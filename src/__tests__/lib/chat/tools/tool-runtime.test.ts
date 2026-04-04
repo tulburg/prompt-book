@@ -133,19 +133,23 @@ function installWindowStubs(files: FileMap) {
 						typeof payload?.description === "string" && payload.description.trim()
 							? payload.description.trim()
 							: undefined;
-					const paragraph = String(payload?.paragraph ?? "").trim();
+					const contentBody = String(payload?.contentBody ?? "").trim();
 					const filePath = `/workspace/.odex/context/${filename}`;
 					const existing = files.get(filePath);
 					const parsed = existing ? parseContextMarkdown(filename, existing) : null;
 					const nextTitle = title ?? parsed?.title;
 					const nextDescription = description ?? parsed?.description;
-					if (!nextTitle || !nextDescription || !paragraph) {
+					if (!nextTitle || !nextDescription || !contentBody) {
 						throw new Error("Missing context metadata.");
 					}
+					const pointers = contentBody
+						.split(/\n{2,}/)
+						.map((entry: string) => entry.trim())
+						.filter(Boolean);
 					const content = serializeContextMarkdown({
 						title: nextTitle,
 						description: nextDescription,
-						paragraphs: [...(parsed?.paragraphs ?? []), `[2026-04-04T00:00:00.000Z] ${paragraph}`],
+						pointers,
 					});
 					files.set(filePath, content);
 					return {
@@ -205,7 +209,7 @@ function installWindowStubs(files: FileMap) {
 						typeof payload?.contextFilename === "string" && payload.contextFilename.trim()
 							? payload.contextFilename.trim()
 							: `${blockId}.md`;
-					const contextPath = `${blockDir}/context/${contextFilename}`;
+					const contextPath = `/workspace/.odex/context/${contextFilename}`;
 					const contextContent = files.get(contextPath);
 					const parsedContext = contextContent ? parseContextMarkdown(contextFilename, contextContent) : null;
 					const nextContextTitle =
@@ -216,19 +220,20 @@ function installWindowStubs(files: FileMap) {
 						typeof payload?.contextDescription === "string" && payload.contextDescription.trim()
 							? payload.contextDescription.trim()
 							: parsedContext?.description || definition;
-					const contextParagraph = String(payload?.contextParagraph ?? "").trim();
-					if (!title || !definition || !contextParagraph) {
+					const contextBody = String(payload?.contextBody ?? "").trim();
+					if (!title || !definition || !contextBody) {
 						throw new Error("Missing block metadata.");
 					}
+					const contextPointers = contextBody
+						.split(/\n{2,}/)
+						.map((entry: string) => entry.trim())
+						.filter(Boolean);
 					files.set(
 						contextPath,
 						serializeContextMarkdown({
 							title: nextContextTitle,
 							description: nextContextDescription,
-							paragraphs: [
-								...(parsedContext?.paragraphs ?? []),
-								`[2026-04-04T00:00:00.000Z] ${contextParagraph}`,
-							],
+							pointers: contextPointers,
 						}),
 					);
 					files.set(
@@ -394,7 +399,7 @@ describe("tool runtime", () => {
 				serializeContextMarkdown({
 					title: "Codebase",
 					description: "Current codebase structure and conventions.",
-					paragraphs: ["[2026-04-03T00:00:00.000Z] Initial context."],
+					pointers: ["Entry point at src/main.ts, bootstraps the Electron app."],
 				}),
 			],
 		]);
@@ -407,17 +412,17 @@ describe("tool runtime", () => {
 
 		const read = await context.readContext("codebase.md");
 		expect(read.description).toBe("Current codebase structure and conventions.");
-		expect(read.content).toContain("## Context Log");
+		expect(read.content).toContain("## Context Map");
 
 		const written = await context.writeContext({
 			filename: "codebase.md",
 			description: "Current codebase structure, conventions, and recent context-tool changes.",
-			paragraph: "Added a persistent Context tool backed by .odex/context.",
+			contentBody: "Entry point at src/main.ts, bootstraps the Electron app.\n\nContext tool backed by .odex/context provides persistent project pointers.",
 		});
 		expect(written.action).toBe("updated");
 		expect(written.description).toContain("context-tool changes");
 		expect(files.get("/workspace/.odex/context/codebase.md")).toContain(
-			"Added a persistent Context tool backed by .odex/context.",
+			"Context tool backed by .odex/context provides persistent project pointers.",
 		);
 	});
 
@@ -428,7 +433,7 @@ describe("tool runtime", () => {
 				serializeContextMarkdown({
 					title: "Codebase",
 					description: "Project overview.",
-					paragraphs: ["[2026-04-04T00:00:00.000Z] Bootstrapped context."],
+					pointers: ["Bootstrapped context for project."],
 				}),
 			],
 		]);
@@ -450,7 +455,7 @@ describe("tool runtime", () => {
 					definition: "The chat tool runtime and instruction layer.",
 					files: ["/workspace/src/lib/chat/tools/tool-registry.ts"],
 					diagramPath: "/workspace/.odex/blocks/chat-tools/diagram.mmd",
-					contextPath: "/workspace/.odex/blocks/chat-tools/context/chat-tools.md",
+					contextPath: "/workspace/.odex/context/chat-tools.md",
 				}),
 			],
 			[
@@ -458,11 +463,11 @@ describe("tool runtime", () => {
 				'flowchart TD\n    Block["Chat Tools"]\n',
 			],
 			[
-				"/workspace/.odex/blocks/chat-tools/context/chat-tools.md",
+				"/workspace/.odex/context/chat-tools.md",
 				serializeContextMarkdown({
 					title: "Chat Tools Context",
 					description: "Context for the chat tools block.",
-					paragraphs: ["[2026-04-03T00:00:00.000Z] Initial block context."],
+					pointers: ["Tool registry at src/lib/chat/tools/tool-registry.ts manages available tools."],
 				}),
 			],
 		]);
@@ -484,13 +489,13 @@ describe("tool runtime", () => {
 				"/workspace/src/lib/chat/tools/tool-registry.ts",
 				"/workspace/src/lib/chat/tools/builtin/block-tool.ts",
 			],
-			contextParagraph: "Added block persistence and block-level model instructions.",
+			contextBody: "Tool registry at src/lib/chat/tools/tool-registry.ts manages available tools.\n\nBlock persistence and block-level model instructions handled by block-tool.ts.",
 			diagramContent: 'flowchart TD\n    Block["Chat Tools"]\n    Runtime["Tool Runtime"]\n    Block --> Runtime',
 		});
 		expect(written.action).toBe("updated");
 		expect(written.files).toContain("/workspace/src/lib/chat/tools/builtin/block-tool.ts");
-		expect(files.get("/workspace/.odex/blocks/chat-tools/context/chat-tools.md")).toContain(
-			"Added block persistence and block-level model instructions.",
+		expect(files.get("/workspace/.odex/context/chat-tools.md")).toContain(
+			"Block persistence and block-level model instructions handled by block-tool.ts.",
 		);
 		expect(files.get("/workspace/.odex/blocks/chat-tools/diagram.mmd")).toContain("Tool Runtime");
 	});
@@ -507,16 +512,16 @@ describe("tool runtime", () => {
 				"/workspace/src/main.tsx",
 				"/workspace/src/app.tsx",
 			],
-			contextParagraph: "Created the initial frontend UI block for future maintenance.",
+			contextBody: "Entry point at src/main.tsx renders the React app.\n\nApp shell at src/app.tsx provides layout and routing.",
 		});
 
 		expect(written.action).toBe("created");
 		expect(written.schemaPath).toBe("/workspace/.odex/blocks/app-frontend-ui/block.json");
-		expect(written.contextPath).toBe("/workspace/.odex/blocks/app-frontend-ui/context/app-frontend-ui.md");
+		expect(written.contextPath).toBe("/workspace/.odex/context/app-frontend-ui.md");
 		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/block.json")).toContain("Frontend UI");
 		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/diagram.mmd")).toContain("flowchart TD");
-		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/context/app-frontend-ui.md")).toContain(
-			"Created the initial frontend UI block for future maintenance.",
+		expect(files.get("/workspace/.odex/context/app-frontend-ui.md")).toContain(
+			"App shell at src/app.tsx provides layout and routing.",
 		);
 	});
 });

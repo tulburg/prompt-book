@@ -56,7 +56,7 @@ const fakeToolContext: ChatToolContext = {
 		description: input.description ?? "Workspace context",
 		path: `/workspace/.odex/context/${input.filename}`,
 		content: "# Codebase",
-		action: "updated",
+		action: "updated" as const,
 	}),
 	listBlocks: async () => [],
 	readBlock: async (blockId) => ({
@@ -65,7 +65,7 @@ const fakeToolContext: ChatToolContext = {
 		definition: "Chat tool architecture",
 		schemaPath: `/workspace/.odex/blocks/${blockId}/block.json`,
 		diagramPath: `/workspace/.odex/blocks/${blockId}/diagram.mmd`,
-		contextPath: `/workspace/.odex/blocks/${blockId}/context/${blockId}.md`,
+		contextPath: `/workspace/.odex/context/${blockId}.md`,
 		files: [],
 	}),
 	writeBlock: async (input) => ({
@@ -74,7 +74,7 @@ const fakeToolContext: ChatToolContext = {
 		definition: input.definition ?? "Chat tool architecture",
 		schemaPath: `/workspace/.odex/blocks/${input.blockId}/block.json`,
 		diagramPath: `/workspace/.odex/blocks/${input.blockId}/diagram.mmd`,
-		contextPath: `/workspace/.odex/blocks/${input.blockId}/context/${input.blockId}.md`,
+		contextPath: `/workspace/.odex/context/${input.blockId}.md`,
 		files: input.files ?? [],
 		action: "updated",
 	}),
@@ -148,239 +148,6 @@ describe("request builder", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "Final answer" }],
 		});
-		expect(request.system.join("\n")).toContain("# Runtime Context");
-		expect(request.system.join("\n")).toContain("# User Context");
-	});
-
-	it("injects the session title into anthropic user reminders", () => {
-		const session: ChatSessionState = {
-			id: "session-title-anthropic",
-			title: "Auth cleanup",
-			mode: "Agent",
-			modelId: "claude-sonnet-4-6",
-			createdAt: Date.now(),
-			bootstrappedAt: Date.now(),
-			closedAt: null,
-			transcript: [
-				createTranscriptEntry({
-					role: "user",
-					content: "Inspect the auth flow",
-					visibility: "visible",
-					includeInHistory: true,
-					subtype: "message",
-				}),
-			],
-		};
-
-		const request = buildAnthropicRequest({
-			session,
-			queryContext: buildQueryContext({
-				session,
-				platform: "test-platform",
-				now: new Date("2026-04-02T12:00:00.000Z"),
-			}),
-			model: "claude-sonnet-4-6",
-			modelName: "Claude Sonnet 4.6",
-			provider: "anthropic",
-		});
-
-		expect(request.messages[0]).toMatchObject({
-			role: "user",
-		});
-		expect(request.messages[0]?.content?.[0]?.text).toContain("sessionTitle: Auth cleanup");
-	});
-
-	it("includes the session title in agent request context", () => {
-		const session: ChatSessionState = {
-			id: "session-title-agent",
-			title: "Review auth agent",
-			mode: "Agent",
-			modelId: "gpt-5",
-			windowKind: "agent",
-			createdAt: Date.now(),
-			bootstrappedAt: Date.now(),
-			closedAt: null,
-			transcript: [
-				createTranscriptEntry({
-					role: "user",
-					content: "Check the latest auth changes",
-					visibility: "visible",
-					includeInHistory: true,
-					subtype: "message",
-				}),
-			],
-		};
-
-		const request = buildAnthropicRequest({
-			session,
-			queryContext: buildQueryContext({
-				session,
-				platform: "test-platform",
-				now: new Date("2026-04-02T12:00:00.000Z"),
-			}),
-			model: "gpt-5",
-			modelName: "GPT-5",
-			provider: "openai",
-		});
-
-		expect(request.system.join("\n")).toContain("# User Context");
-		expect(request.system.join("\n")).toContain("- sessionTitle: Review auth agent");
-	});
-
-	it("switches qwen models to plain role-based context formatting", () => {
-		const session: ChatSessionState = {
-			id: "session-qwen",
-			title: "New Chat",
-			mode: "Agent",
-			modelId: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-			createdAt: Date.now(),
-			bootstrappedAt: Date.now(),
-			closedAt: null,
-			transcript: [
-				createTranscriptEntry({
-					role: "user",
-					content: "Hello there",
-					visibility: "visible",
-					includeInHistory: true,
-					subtype: "message",
-				}),
-			],
-		};
-
-		const request = buildAnthropicRequest({
-			session,
-			queryContext: buildQueryContext({
-				session,
-				platform: "test-platform",
-				now: new Date("2026-04-02T12:00:00.000Z"),
-			}),
-			model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-			provider: "llama",
-		});
-
-		expect(request.format).toBe("qwen");
-		expect(request.messages).toEqual([
-			{
-				role: "user",
-				content: [{ type: "text", text: "Hello there" }],
-			},
-		]);
-		expect(request.system.join("\n")).toContain("# Runtime Context");
-		expect(request.system.join("\n")).toContain("# User Context");
-		expect(request.system.join("\n")).not.toContain("<system-context>");
-	});
-
-	it("uses openai profile formatting without collapsing system sections", () => {
-		const session: ChatSessionState = {
-			id: "session-openai",
-			title: "New Chat",
-			mode: "Agent",
-			modelId: "openai/gpt-oss-20b",
-			createdAt: Date.now(),
-			bootstrappedAt: Date.now(),
-			closedAt: null,
-			transcript: [
-				createTranscriptEntry({
-					role: "user",
-					content: "Hello there",
-					visibility: "visible",
-					includeInHistory: true,
-					subtype: "message",
-				}),
-			],
-		};
-
-		const request = buildAnthropicRequest({
-			session,
-			queryContext: buildQueryContext({
-				session,
-				platform: "test-platform",
-				now: new Date("2026-04-02T12:00:00.000Z"),
-			}),
-			model: "openai/gpt-oss-20b",
-			modelName: "GPT OSS 20B",
-			provider: "llama",
-		});
-
-		expect(request.format).toBe("openai");
-		expect(request.messages).toEqual([
-			{
-				role: "user",
-				content: [{ type: "text", text: "Hello there" }],
-			},
-		]);
-		expect(request.system.length).toBeGreaterThan(1);
-		expect(request.system.join("\n")).toContain("# Runtime Context");
-		expect(request.system.join("\n")).toContain("# User Context");
-		expect(request.system.join("\n")).not.toContain("<system-context>");
-	});
-
-	it("attaches native tool definitions for supported models", () => {
-		const session: ChatSessionState = {
-			id: "session-openai-tools",
-			title: "New Chat",
-			mode: "Agent",
-			modelId: "openai/gpt-oss-20b",
-			createdAt: Date.now(),
-			bootstrappedAt: Date.now(),
-			closedAt: null,
-			transcript: [
-				createTranscriptEntry({
-					role: "user",
-					content: "Read a file",
-					visibility: "visible",
-					includeInHistory: true,
-					subtype: "message",
-				}),
-			],
-		};
-
-		const request = buildAnthropicRequest({
-			session,
-			queryContext: buildQueryContext({
-				session,
-				platform: "test-platform",
-				now: new Date("2026-04-02T12:00:00.000Z"),
-			}),
-			model: "openai/gpt-oss-20b",
-			modelName: "GPT OSS 20B",
-			provider: "llama",
-			toolContext: fakeToolContext,
-		});
-
-		expect(request.nativeToolCalling).toBe(true);
-		expect(request.tools?.some((tool) => tool.function.name === "Read")).toBe(true);
-		expect(request.tools?.some((tool) => tool.function.name === "AskUserQuestion")).toBe(true);
-		expect(request.tools?.some((tool) => tool.function.name === "Agent")).toBe(true);
-		const bashTool = request.tools?.find((tool) => tool.function.name === "Bash");
-		expect(bashTool?.function.parameters.properties?.timeout?.type).toBe("integer");
-		expect(bashTool?.function.parameters.properties?.run_in_background?.type).toBe("boolean");
-		expect(bashTool?.function.parameters.properties?.working_directory?.type).toBe("string");
-		expect(request.system.join("\n")).toContain("CRITICAL: When not using native structured tool calls");
-		expect(request.system.join("\n")).toContain('{"tool":"<tool_name>","arguments":{"<argument_name>":"<argument_value>"}}');
-		expect(request.system.join("\n")).toContain("When you emit thinking or reasoning");
-		expect(request.system.join("\n")).toContain("Listing context is the first thing to do before any executions");
-		expect(request.system.join("\n")).toContain("From the provided context list, you must load at least 1 context");
-		expect(request.system.join("\n")).toContain("update at least 1 affected block");
-		expect(request.system.join("\n")).toContain("Apply these context rules when working inside an Odex-managed target project");
-		expect(request.system.join("\n")).toContain("automatically create any missing context");
-		expect(request.system.join("\n")).toContain("automatically create any missing block");
-		expect(request.system.join("\n")).toContain("do not ask the user for permission or confirmation before creating or updating context files");
-		expect(request.system.join("\n")).toContain("Before using `Context` with `action: \"read\"`, call `Context` with `action: \"list\"`");
-		expect(request.system.join("\n")).toContain("Never guess or invent context filenames for read operations");
-		expect(request.system.join("\n")).toContain("Create or update contexts from actual code understanding");
-		expect(request.system.join("\n")).toContain("update at least 1 affected context");
-		expect(request.system.join("\n")).toContain("Before using `Block` with `read`, `read_context`, `read_diagram`, or `read_files`, call `Block` with `action: \"list\"`");
-		expect(request.system.join("\n")).toContain("Never guess or invent block ids for read operations");
-		expect(request.system.join("\n")).toContain("Blocks should represent concrete product features or workflows");
-		expect(request.system.join("\n")).toContain("Do not create or update blocks from file structure alone");
-		expect(request.system.join("\n")).toContain("blocks should map to real project features or workflows");
-		expect(request.system.join("\n")).toContain("do not ask the user for permission or granularity preferences");
-		expect(request.system.join("\n")).toContain("not automatically in the current repository");
-		expect(request.tools?.some((tool) => tool.function.name === "Block" && String(tool.function.description).includes("project feature or workflow"))).toBe(true);
-		expect(request.tools?.some((tool) => tool.function.name === "Block" && String(tool.function.description).includes("Use write to create a missing block"))).toBe(true);
-		expect(request.tools?.some((tool) => tool.function.name === "Context" && String(tool.function.description).includes("Use write to create a missing context"))).toBe(true);
-		expect(request.system.join("\n")).toContain("# Available Tools");
 	});
 
 	it("serializes qwen tool turns without assistant echo text", () => {
@@ -516,7 +283,6 @@ describe("request builder", () => {
 			toolContext: fakeToolContext,
 		});
 
-		expect(request.format).toBe("gemma");
 		expect(request.messages).toHaveLength(2);
 		expect(request.messages[1]).toMatchObject({
 			role: "user",
@@ -528,7 +294,7 @@ describe("request builder", () => {
 		expect(request.messages[1]?.content?.[0]?.text).toContain("missing file");
 	});
 
-	it("formats Gemini requests with plain text tool history and google provider metadata", () => {
+	it("formats Gemini requests with plain text tool history", () => {
 		const session: ChatSessionState = {
 			id: "session-gemini",
 			title: "New Chat",
@@ -586,9 +352,6 @@ describe("request builder", () => {
 			toolContext: fakeToolContext,
 		});
 
-		expect(request.format).toBe("gemini");
-		expect(request.nativeToolCalling).toBe(false);
-		expect(request.metadata.provider).toBe("google");
 		expect(request.messages[1]).toEqual({
 			role: "assistant",
 			content: [
@@ -605,7 +368,7 @@ describe("request builder", () => {
 		});
 	});
 
-	it("formats Anthropic requests with text tool history and anthropic provider metadata", () => {
+	it("formats Anthropic requests with text tool history", () => {
 		const session: ChatSessionState = {
 			id: "session-claude",
 			title: "New Chat",
@@ -663,9 +426,6 @@ describe("request builder", () => {
 			toolContext: fakeToolContext,
 		});
 
-		expect(request.format).toBe("anthropic");
-		expect(request.nativeToolCalling).toBe(false);
-		expect(request.metadata.provider).toBe("anthropic");
 		expect(request.messages).toContainEqual({
 			role: "assistant",
 			content: [
@@ -718,9 +478,6 @@ describe("request builder", () => {
 			toolContext: fakeToolContext,
 		});
 
-		expect(request.format).toBe("openai");
-		expect(request.nativeToolCalling).toBe(true);
-		expect(request.metadata.provider).toBe("openai");
 		expect(request.tools?.length ?? 0).toBeGreaterThan(0);
 	});
 });

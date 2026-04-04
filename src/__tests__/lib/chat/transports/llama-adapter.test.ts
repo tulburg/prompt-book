@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	buildLlamaChatCompletionRequest,
 	filterModelTextContent,
-	toUserFacingLlamaServerErrorMessage,
 } from "@/lib/chat/llama-chat-codec";
 import { LlamaChatAdapter } from "@/lib/chat/transports/llama-adapter";
 import type { AnthropicRequest } from "@/lib/chat/types";
@@ -47,55 +46,8 @@ describe("llama adapter", () => {
 		});
 	});
 
-	it("strips __SYSTEM_PROMPT_DYNAMIC_BOUNDARY__ from system sections", () => {
-		const request: AnthropicRequest = {
-			model: "qwen-model",
-			system: [
-				"# Identity\nYou are helpful.\n\n__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n\n# Mode: Agent",
-			],
-			messages: [
-				{ role: "user", content: [{ type: "text", text: "hi" }] },
-			],
-			stream: true,
-			format: "qwen",
-			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
-		};
-
-		const result = buildLlamaChatCompletionRequest(request);
-		const systemContent = result.messages
-			.filter((m) => m.role === "system")
-			.map((m) => m.content)
-			.join("\n");
-		expect(systemContent).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
-		expect(systemContent).toContain("# Identity");
-		expect(systemContent).toContain("# Mode: Agent");
-	});
-
-	it("includes model-appropriate stop tokens for qwen format", () => {
-		const request: AnthropicRequest = {
-			model: "qwen-model",
-			system: ["system"],
-			messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-			stream: true,
-			format: "qwen",
-			metadata: { sessionId: "s", mode: "Agent", provider: "llama" },
-		};
-
-		const result = buildLlamaChatCompletionRequest(request);
-		expect(result.stop).toContain("<|im_end|>");
-		expect(result.temperature).toBe(0.7);
-	});
-
 	it("filters local model control tokens from model text", () => {
 		expect(filterModelTextContent("Hello<|assistant|> world<|end|>")).toBe("Hello world");
-	});
-
-	it("maps local model prompt template mismatches to a clearer user error", () => {
-		expect(
-			toUserFacingLlamaServerErrorMessage(
-				"Llama server chat completions request failed with status 400: error rendering prompt with jinja template",
-			),
-		).toContain("could not format the conversation");
 	});
 });
 

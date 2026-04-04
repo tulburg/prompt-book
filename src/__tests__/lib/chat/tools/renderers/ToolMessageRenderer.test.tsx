@@ -5,7 +5,7 @@ import type { ChatMessage } from "@/lib/chat/types";
 import { ToolMessageRenderer } from "@/lib/chat/tools/renderers/ToolMessageRenderer";
 
 describe("ToolMessageRenderer", () => {
-  it("renders the shapes icon for context tool messages", () => {
+  it("renders explicit context update labels with the shapes icon", () => {
     const message: ChatMessage = {
       id: "tool-use-context-1",
       role: "assistant",
@@ -52,10 +52,11 @@ describe("ToolMessageRenderer", () => {
       <ToolMessageRenderer message={message} pairedResult={pairedResult} />,
     );
 
+    expect(screen.getByText("Update Context: codebase.md")).toBeDefined();
     expect(container.querySelector(".lucide-shapes")).not.toBeNull();
   });
 
-  it("renders explicit block write labels with the cuboid icon", () => {
+  it("renders explicit block update labels with the cuboid icon", () => {
     const message: ChatMessage = {
       id: "tool-use-1",
       role: "assistant",
@@ -100,8 +101,55 @@ describe("ToolMessageRenderer", () => {
       <ToolMessageRenderer message={message} pairedResult={pairedResult} />,
     );
 
-    expect(screen.getByText("Write Block: payments")).toBeDefined();
+    expect(screen.getByText("Update Block: payments")).toBeDefined();
     expect(container.querySelector(".lucide-cuboid")).not.toBeNull();
+  });
+
+  it("renders explicit block create labels after block creation succeeds", () => {
+    const message: ChatMessage = {
+      id: "tool-use-3",
+      role: "assistant",
+      content: 'Block({"action":"write","block_id":"checkout"})',
+      timestamp: Date.now(),
+      subtype: "tool_use",
+      toolInvocation: {
+        toolCallId: "call-3",
+        toolName: "Block",
+        input: {
+          action: "write",
+          block_id: "checkout",
+        },
+      },
+    };
+    const pairedResult: ChatMessage = {
+      id: "tool-result-3",
+      role: "tool",
+      content: "Created block checkout.",
+      timestamp: Date.now(),
+      subtype: "tool_result",
+      toolResult: {
+        toolCallId: "call-3",
+        toolName: "Block",
+        input: {
+          action: "write",
+          block_id: "checkout",
+        },
+        outputText: "Created block checkout.",
+        display: {
+          kind: "json",
+          title: "checkout",
+          value: {
+            id: "checkout",
+            title: "Checkout",
+            action: "created",
+          },
+        },
+      },
+    };
+
+    render(<ToolMessageRenderer message={message} pairedResult={pairedResult} />);
+
+    expect(screen.getByText("Create Block: checkout")).toBeDefined();
   });
 
   it("renders explicit block read labels", () => {

@@ -13,7 +13,7 @@ type BlockToolInput = JsonObject & {
 	context_filename?: string;
 	context_title?: string;
 	context_description?: string;
-	context_paragraph?: string;
+	context_body?: string;
 };
 
 function formatNumberedContent(content: string, startLine = 1): string {
@@ -31,6 +31,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 	description: [
 		"List, inspect, and update project blocks stored in .odex/blocks.",
 		"Blocks describe a project feature or workflow with its definition, files, diagram, and linked context.",
+		"Block write can also update the linked context when you provide context metadata and context_body.",
 		"Decide blocks from actual code behavior and feature boundaries, not from folder structure alone.",
 		"Use write to create a missing block; do not use read actions for blocks that are not listed yet.",
 		"After project modifications, update at least one affected block.",
@@ -70,7 +71,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 			},
 			context_filename: {
 				type: "string",
-				description: "Context markdown filename inside the block's sibling context folder.",
+				description: "Context markdown filename in .odex/context.",
 			},
 			context_title: {
 				type: "string",
@@ -80,9 +81,9 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 				type: "string",
 				description: "Updated linked-context description.",
 			},
-			context_paragraph: {
+			context_body: {
 				type: "string",
-				description: "Paragraph to append to the linked context log.",
+				description: "Full replacement body for the linked context map. Point-by-point pointers describing where things are and what they do. Overwrites previous content.",
 			},
 		},
 		required: ["action"],
@@ -209,7 +210,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 				contextFilename: coerceString(input.context_filename) || undefined,
 				contextTitle: coerceString(input.context_title) || undefined,
 				contextDescription: coerceString(input.context_description) || undefined,
-				contextParagraph: coerceString(input.context_paragraph),
+				contextBody: coerceString(input.context_body),
 			});
 			const value = {
 				id: result.id,

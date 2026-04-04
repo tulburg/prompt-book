@@ -2,7 +2,7 @@ export interface ParsedContextFile {
 	filename: string;
 	title: string;
 	description: string;
-	paragraphs: string[];
+	pointers: string[];
 	content: string;
 }
 
@@ -40,19 +40,22 @@ export function parseContextMarkdown(filename: string, content: string): ParsedC
 	const afterTitle = titleMatch
 		? normalizedContent.slice((titleMatch.index ?? 0) + titleMatch[0].length).trim()
 		: normalizedContent;
-	const logHeadingIndex = afterTitle.indexOf("## Context Log");
+	const mapHeadingIndex = afterTitle.indexOf("## Context Map");
+	const legacyLogIndex = afterTitle.indexOf("## Context Log");
+	const sectionIndex = mapHeadingIndex >= 0 ? mapHeadingIndex : legacyLogIndex;
+	const sectionHeading = mapHeadingIndex >= 0 ? "## Context Map" : "## Context Log";
 	const descriptionBlock =
-		logHeadingIndex >= 0 ? afterTitle.slice(0, logHeadingIndex).trim() : afterTitle.trim();
+		sectionIndex >= 0 ? afterTitle.slice(0, sectionIndex).trim() : afterTitle.trim();
 	const description = descriptionBlock
 		.split(/\n{2,}/)
 		.map((entry) => entry.trim().replace(/\s+/g, " "))
 		.find(Boolean) ?? "";
 
-	const logBlock =
-		logHeadingIndex >= 0
-			? afterTitle.slice(logHeadingIndex + "## Context Log".length).trim()
+	const mapBlock =
+		sectionIndex >= 0
+			? afterTitle.slice(sectionIndex + sectionHeading.length).trim()
 			: "";
-	const paragraphs = logBlock
+	const pointers = mapBlock
 		.split(/\n{2,}/)
 		.map((entry) => entry.trim())
 		.filter(Boolean);
@@ -61,7 +64,7 @@ export function parseContextMarkdown(filename: string, content: string): ParsedC
 		filename,
 		title,
 		description,
-		paragraphs,
+		pointers,
 		content: normalizedContent,
 	};
 }
@@ -69,19 +72,19 @@ export function parseContextMarkdown(filename: string, content: string): ParsedC
 export function serializeContextMarkdown(input: {
 	title: string;
 	description: string;
-	paragraphs: string[];
+	pointers: string[];
 }): string {
 	const title = input.title.trim();
 	const description = input.description.trim();
-	const paragraphs = input.paragraphs.map((entry) => entry.trim()).filter(Boolean);
+	const pointers = input.pointers.map((entry) => entry.trim()).filter(Boolean);
 
 	const sections = [`# ${title}`];
 	if (description) {
 		sections.push(description);
 	}
-	sections.push("## Context Log");
-	if (paragraphs.length > 0) {
-		sections.push(paragraphs.join("\n\n"));
+	sections.push("## Context Map");
+	if (pointers.length > 0) {
+		sections.push(pointers.join("\n\n"));
 	}
 
 	return `${sections.join("\n\n").trim()}\n`;
