@@ -11,6 +11,7 @@ import {
 } from "@/lib/chat/chat-models";
 import { fetchOpenAiModels } from "@/lib/chat/openai-model-discovery";
 import { useApplicationSettings } from "@/lib/use-application-settings";
+import type { ApplicationSettings } from "@/lib/application-settings";
 import { parseAssistantRenderableContent } from "@/lib/chat/render-message-content";
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import {
@@ -66,6 +67,8 @@ interface ChatPanelProps {
   initialModelId?: string;
   /** Full model metadata to preserve agent provider selection */
   initialModel?: ChatModelInfo | null;
+  /** Optional settings snapshot passed from the launching window */
+  initialSettings?: ApplicationSettings | null;
 }
 
 function sameModel(
@@ -87,6 +90,33 @@ function findMatchingModel(
   );
 }
 
+function resolveChatSettings(
+  settings: ApplicationSettings | null | undefined,
+  fallbackSettings: ApplicationSettings | null | undefined,
+): ApplicationSettings | null {
+  if (!settings && !fallbackSettings) {
+    return null;
+  }
+  if (!settings) {
+    return fallbackSettings ?? null;
+  }
+  if (!fallbackSettings) {
+    return settings;
+  }
+  return {
+    ...settings,
+    "chat.providers.google.apiKey":
+      settings["chat.providers.google.apiKey"].trim() ||
+      fallbackSettings["chat.providers.google.apiKey"],
+    "chat.providers.anthropic.apiKey":
+      settings["chat.providers.anthropic.apiKey"].trim() ||
+      fallbackSettings["chat.providers.anthropic.apiKey"],
+    "chat.providers.openai.apiKey":
+      settings["chat.providers.openai.apiKey"].trim() ||
+      fallbackSettings["chat.providers.openai.apiKey"],
+  };
+}
+
 export function ChatPanel({
   className,
   onOpenFileAtLine,
@@ -95,9 +125,14 @@ export function ChatPanel({
   initialPrompt,
   initialModelId,
   initialModel,
+  initialSettings,
 }: ChatPanelProps) {
   const isAgent = variant === "agent";
   const { isBootstrapping, settings } = useApplicationSettings();
+  const effectiveSettings = React.useMemo(
+    () => resolveChatSettings(settings, initialSettings),
+    [initialSettings, settings],
+  );
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(
     null,
@@ -167,17 +202,18 @@ export function ChatPanel({
   }, [slashCommands, slashFilter]);
 
   const hasGoogleGeminiConfigured = Boolean(
-    settings?.["chat.providers.google.apiKey"].trim(),
+    effectiveSettings?.["chat.providers.google.apiKey"].trim(),
   );
   const hasAnthropicClaudeConfigured = Boolean(
-    settings?.["chat.providers.anthropic.apiKey"].trim(),
+    effectiveSettings?.["chat.providers.anthropic.apiKey"].trim(),
   );
   const hasOpenAiConfigured = Boolean(
-    settings?.["chat.providers.openai.apiKey"].trim(),
+    effectiveSettings?.["chat.providers.openai.apiKey"].trim(),
   );
 
   React.useEffect(() => {
-    const apiKey = settings?.["chat.providers.openai.apiKey"]?.trim() ?? "";
+    const apiKey =
+      effectiveSettings?.["chat.providers.openai.apiKey"]?.trim() ?? "";
     if (!apiKey) {
       setOpenAiModels([]);
       setIsLoadingOpenAiModels(false);
@@ -214,11 +250,11 @@ export function ChatPanel({
       cancelled = true;
       abortController.abort();
     };
-  }, [settings?.["chat.providers.openai.apiKey"]]);
+  }, [effectiveSettings?.["chat.providers.openai.apiKey"]]);
 
   const remoteModels = React.useMemo(
-    () => getConfiguredFrontierModels(settings, { openAiModels }),
-    [openAiModels, settings],
+    () => getConfiguredFrontierModels(effectiveSettings, { openAiModels }),
+    [effectiveSettings, openAiModels],
   );
   const availableModels = React.useMemo(
     () => [...installedModels, ...remoteModels],
@@ -383,9 +419,13 @@ export function ChatPanel({
     if (!isAgent) return;
     if (!activeSession) return;
     const modelForInitialSend = initialModel ?? selectedModel;
+    const settingsForInitialSend = effectiveSettings;
     if (!modelForInitialSend) return;
     if (initialModelId && modelForInitialSend.id !== initialModelId) return;
-    if (!isLocalChatModel(modelForInitialSend) && (isBootstrapping || !settings)) {
+    if (
+      !isLocalChatModel(modelForInitialSend) &&
+      (isBootstrapping || !settingsForInitialSend)
+    ) {
       return;
     }
     sentInitialPromptRef.current = true;
@@ -393,7 +433,7 @@ export function ChatPanel({
     chatService.currentModel = modelForInitialSend;
     void chatService.sendMessage(initialPrompt.trim(), {
       mode: "Agent",
-      settings,
+      settings: settingsForInitialSend,
     });
   }, [
     isAgent,
@@ -402,8 +442,8 @@ export function ChatPanel({
     initialPrompt,
     activeSession,
     selectedModel,
+    effectiveSettings,
     isBootstrapping,
-    settings,
   ]);
 
   React.useEffect(() => {
@@ -530,11 +570,16 @@ export function ChatPanel({
               openAgent: (
                 prompt: string,
                 model?: ChatModelInfo | null,
+                settings?: ApplicationSettings | null,
               ) => Promise<unknown>;
             }
           | undefined;
         if (bridge) {
-          void bridge.openAgent(commandArg, modelForAgentLaunch);
+          void bridge.openAgent(
+            commandArg,
+            modelForAgentLaunch,
+            effectiveSettings,
+          );
         }
         return;
       }
@@ -545,7 +590,10 @@ export function ChatPanel({
       textareaRef.current.style.height = "auto";
     }
 
-    await chatService.sendMessage(trimmed, { mode: chatMode, settings });
+    await chatService.sendMessage(trimmed, {
+      mode: chatMode,
+      settings: effectiveSettings,
+    });
   };
 
   const handleStopGeneration = () => {

@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ApplicationSettings } from "../../src/lib/application-settings";
 import type { ChatModelInfo } from "../../src/lib/chat/chat-models";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,10 +12,33 @@ const VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(APP_ROOT, "public")
   : RENDERER_DIST;
 
+type AgentLaunchPayload = {
+  prompt: string;
+  model?: ChatModelInfo | null;
+  settings?: ApplicationSettings | null;
+};
+
+const agentLaunchPayloads = new Map<number, AgentLaunchPayload>();
+
 export function registerWindowHandlers() {
+  ipcMain.handle("window:get-agent-launch-context", (event) => {
+    const agentWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!agentWindow) {
+      return null;
+    }
+    return agentLaunchPayloads.get(agentWindow.id) ?? null;
+  });
+
   ipcMain.handle(
     "window:open-agent",
-    async (_event, payload: { prompt: string; model?: ChatModelInfo | null }) => {
+    async (
+      _event,
+      payload: {
+        prompt: string;
+        model?: ChatModelInfo | null;
+        settings?: ApplicationSettings | null;
+      },
+    ) => {
       const agentWin = new BrowserWindow({
         width: 520,
         height: 680,
@@ -24,6 +48,15 @@ export function registerWindowHandlers() {
           preload: path.join(__dirname, "../preload.mjs"),
         },
         titleBarStyle: "hiddenInset",
+      });
+
+      agentLaunchPayloads.set(agentWin.id, {
+        prompt: payload.prompt,
+        model: payload.model ?? null,
+        settings: payload.settings ?? null,
+      });
+      agentWin.on("closed", () => {
+        agentLaunchPayloads.delete(agentWin.id);
       });
 
       // Load the same app but with a query param so the renderer knows it's an agent window

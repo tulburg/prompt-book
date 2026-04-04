@@ -2,7 +2,7 @@
 
 import type { NativeContextMenuBridge } from "@/lib/native-context-menu";
 import type { DownloadedModelArtifact, PullProgressEvent } from "@/lib/model-downloads";
-import type { SettingsBridge } from "@/lib/application-settings";
+import type { ApplicationSettings, SettingsBridge } from "@/lib/application-settings";
 import type { ChatModelInfo } from "@/lib/chat/chat-models";
 import type { ProjectBridge } from "@/lib/project-files";
 
@@ -31,7 +31,13 @@ declare global {
 			openAgent: (
 				prompt: string,
 				model?: ChatModelInfo | null,
+				settings?: ApplicationSettings | null,
 			) => Promise<unknown>;
+			getAgentLaunchContext: () => Promise<{
+				prompt: string;
+				model?: ChatModelInfo | null;
+				settings?: ApplicationSettings | null;
+			} | null>;
 		};
 		llamaBridge?: {
 			isBinaryInstalled: () => Promise<boolean>;
