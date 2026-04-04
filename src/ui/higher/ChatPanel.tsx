@@ -357,6 +357,16 @@ export function ChatPanel({
       availableModels[0] ??
       null;
 
+    if (isAgent) {
+      console.log("[ChatPanel:agent] model sync:", {
+        initialModelId,
+        preferredModelId,
+        availableCount: availableModels.length,
+        nextSelectedModel: nextSelectedModel?.id,
+        currentSelected: selectedModel?.id,
+      });
+    }
+
     if (
       nextSelectedModel &&
       nextSelectedModel.id === selectedModel?.id &&
@@ -375,7 +385,7 @@ export function ChatPanel({
 
     setSelectedModel(nextSelectedModel);
     chatService.currentModel = nextSelectedModel;
-  }, [activeSession?.modelId, availableModels, selectedModel]);
+  }, [initialModelId, activeSession?.modelId, availableModels, selectedModel]);
 
   React.useEffect(() => {
     if (!selectedModel || !isLocalChatModel(selectedModel)) {
@@ -465,6 +475,7 @@ export function ChatPanel({
           | { openAgent: (prompt: string, modelId?: string) => Promise<unknown> }
           | undefined;
         if (bridge) {
+          console.log("[ChatPanel] openAgent modelId:", selectedModel?.id);
           void bridge.openAgent(commandArg, selectedModel?.id);
         }
         return;

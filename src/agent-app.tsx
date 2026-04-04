@@ -9,6 +9,7 @@ export default function AgentApp() {
   const params = new URLSearchParams(window.location.search);
   const initialPrompt = params.get("prompt") ?? "";
   const initialModelId = params.get("modelId") ?? undefined;
+  console.log("[AgentApp] initialModelId:", initialModelId);
 
   const handleClose = () => {
     window.close();
