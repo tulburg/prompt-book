@@ -969,6 +969,7 @@ export function ChatPanel({
           {sessions.map((session) => (
             <div
               key={session.id}
+              ref={session.id === activeSession?.id ? (el) => { el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" }); } : undefined}
               className={`group flex items-center gap-1 border-b-2 border-transparent bg-transparent pl-3 pr-1 text-xs text-foreground-900 transition-colors duration-150 hover:text-foreground ${session.id === activeSession?.id ? "!border-b-foreground font-semibold !text-foreground" : ""}`}
             >
               <button
