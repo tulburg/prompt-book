@@ -65,7 +65,7 @@ const fakeToolContext: ChatToolContext = {
 		definition: "Chat tool architecture",
 		schemaPath: `/workspace/.odex/blocks/${blockId}/block.json`,
 		diagramPath: `/workspace/.odex/blocks/${blockId}/diagram.mmd`,
-		contextPath: `/workspace/.odex/context/${blockId}.md`,
+		contextPath: `/workspace/.odex/blocks/${blockId}/context/${blockId}.md`,
 		files: [],
 	}),
 	writeBlock: async (input) => ({
@@ -74,7 +74,7 @@ const fakeToolContext: ChatToolContext = {
 		definition: input.definition ?? "Chat tool architecture",
 		schemaPath: `/workspace/.odex/blocks/${input.blockId}/block.json`,
 		diagramPath: `/workspace/.odex/blocks/${input.blockId}/diagram.mmd`,
-		contextPath: `/workspace/.odex/context/${input.blockId}.md`,
+		contextPath: `/workspace/.odex/blocks/${input.blockId}/context/${input.blockId}.md`,
 		files: input.files ?? [],
 		action: "updated",
 	}),
@@ -150,6 +150,81 @@ describe("request builder", () => {
 		});
 		expect(request.system.join("\n")).toContain("# Runtime Context");
 		expect(request.system.join("\n")).toContain("# User Context");
+	});
+
+	it("injects the session title into anthropic user reminders", () => {
+		const session: ChatSessionState = {
+			id: "session-title-anthropic",
+			title: "Auth cleanup",
+			mode: "Agent",
+			modelId: "claude-sonnet-4-6",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Inspect the auth flow",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "claude-sonnet-4-6",
+			modelName: "Claude Sonnet 4.6",
+			provider: "anthropic",
+		});
+
+		expect(request.messages[0]).toMatchObject({
+			role: "user",
+		});
+		expect(request.messages[0]?.content?.[0]?.text).toContain("sessionTitle: Auth cleanup");
+	});
+
+	it("includes the session title in agent request context", () => {
+		const session: ChatSessionState = {
+			id: "session-title-agent",
+			title: "Review auth agent",
+			mode: "Agent",
+			modelId: "gpt-5",
+			windowKind: "agent",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [
+				createTranscriptEntry({
+					role: "user",
+					content: "Check the latest auth changes",
+					visibility: "visible",
+					includeInHistory: true,
+					subtype: "message",
+				}),
+			],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+			}),
+			model: "gpt-5",
+			modelName: "GPT-5",
+			provider: "openai",
+		});
+
+		expect(request.system.join("\n")).toContain("# User Context");
+		expect(request.system.join("\n")).toContain("- sessionTitle: Review auth agent");
 	});
 
 	it("switches qwen models to plain role-based context formatting", () => {
@@ -293,12 +368,16 @@ describe("request builder", () => {
 		expect(request.system.join("\n")).toContain("do not ask the user for permission or confirmation before creating or updating context files");
 		expect(request.system.join("\n")).toContain("Before using `Context` with `action: \"read\"`, call `Context` with `action: \"list\"`");
 		expect(request.system.join("\n")).toContain("Never guess or invent context filenames for read operations");
+		expect(request.system.join("\n")).toContain("Create or update contexts from actual code understanding");
 		expect(request.system.join("\n")).toContain("update at least 1 affected context");
 		expect(request.system.join("\n")).toContain("Before using `Block` with `read`, `read_context`, `read_diagram`, or `read_files`, call `Block` with `action: \"list\"`");
 		expect(request.system.join("\n")).toContain("Never guess or invent block ids for read operations");
-		expect(request.system.join("\n")).toContain("Default to coarse-grained blocks around major subsystems or workflows");
+		expect(request.system.join("\n")).toContain("Blocks should represent concrete product features or workflows");
+		expect(request.system.join("\n")).toContain("Do not create or update blocks from file structure alone");
+		expect(request.system.join("\n")).toContain("blocks should map to real project features or workflows");
 		expect(request.system.join("\n")).toContain("do not ask the user for permission or granularity preferences");
 		expect(request.system.join("\n")).toContain("not automatically in the current repository");
+		expect(request.tools?.some((tool) => tool.function.name === "Block" && String(tool.function.description).includes("project feature or workflow"))).toBe(true);
 		expect(request.tools?.some((tool) => tool.function.name === "Block" && String(tool.function.description).includes("Use write to create a missing block"))).toBe(true);
 		expect(request.tools?.some((tool) => tool.function.name === "Context" && String(tool.function.description).includes("Use write to create a missing context"))).toBe(true);
 		expect(request.system.join("\n")).toContain("# Available Tools");

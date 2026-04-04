@@ -26,6 +26,7 @@ export function buildQueryContext({
 			mode: session.mode,
 			platform,
 			sessionId: session.id,
+			sessionTitle: session.title,
 		},
 		systemContext: {
 			date: now.toISOString(),

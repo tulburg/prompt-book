@@ -175,7 +175,7 @@ function installWindowStubs(files: FileMap) {
 						typeof payload?.contextFilename === "string" && payload.contextFilename.trim()
 							? payload.contextFilename.trim()
 							: `${blockId}.md`;
-					const contextPath = `/workspace/.odex/context/${contextFilename}`;
+					const contextPath = `${blockDir}/context/${contextFilename}`;
 					const contextContent = files.get(contextPath);
 					const parsedContext = contextContent ? parseContextMarkdown(contextFilename, contextContent) : null;
 					const nextContextTitle =
@@ -400,7 +400,7 @@ describe("tool runtime", () => {
 					definition: "The chat tool runtime and instruction layer.",
 					files: ["/workspace/src/lib/chat/tools/tool-registry.ts"],
 					diagramPath: "/workspace/.odex/blocks/chat-tools/diagram.mmd",
-					contextPath: "/workspace/.odex/context/chat-tools.md",
+					contextPath: "/workspace/.odex/blocks/chat-tools/context/chat-tools.md",
 				}),
 			],
 			[
@@ -408,7 +408,7 @@ describe("tool runtime", () => {
 				'flowchart TD\n    Block["Chat Tools"]\n',
 			],
 			[
-				"/workspace/.odex/context/chat-tools.md",
+				"/workspace/.odex/blocks/chat-tools/context/chat-tools.md",
 				serializeContextMarkdown({
 					title: "Chat Tools Context",
 					description: "Context for the chat tools block.",
@@ -439,7 +439,7 @@ describe("tool runtime", () => {
 		});
 		expect(written.action).toBe("updated");
 		expect(written.files).toContain("/workspace/src/lib/chat/tools/builtin/block-tool.ts");
-		expect(files.get("/workspace/.odex/context/chat-tools.md")).toContain(
+		expect(files.get("/workspace/.odex/blocks/chat-tools/context/chat-tools.md")).toContain(
 			"Added block persistence and block-level model instructions.",
 		);
 		expect(files.get("/workspace/.odex/blocks/chat-tools/diagram.mmd")).toContain("Tool Runtime");
@@ -462,10 +462,10 @@ describe("tool runtime", () => {
 
 		expect(written.action).toBe("created");
 		expect(written.schemaPath).toBe("/workspace/.odex/blocks/app-frontend-ui/block.json");
-		expect(written.contextPath).toBe("/workspace/.odex/context/app-frontend-ui.md");
+		expect(written.contextPath).toBe("/workspace/.odex/blocks/app-frontend-ui/context/app-frontend-ui.md");
 		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/block.json")).toContain("Frontend UI");
 		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/diagram.mmd")).toContain("flowchart TD");
-		expect(files.get("/workspace/.odex/context/app-frontend-ui.md")).toContain(
+		expect(files.get("/workspace/.odex/blocks/app-frontend-ui/context/app-frontend-ui.md")).toContain(
 			"Created the initial frontend UI block for future maintenance.",
 		);
 	});

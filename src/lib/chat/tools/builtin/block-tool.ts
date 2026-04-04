@@ -30,7 +30,8 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 	uiKind: "json",
 	description: [
 		"List, inspect, and update project blocks stored in .odex/blocks.",
-		"Blocks describe a component group with its definition, files, diagram, and linked context.",
+		"Blocks describe a project feature or workflow with its definition, files, diagram, and linked context.",
+		"Decide blocks from actual code behavior and feature boundaries, not from folder structure alone.",
 		"Use write to create a missing block; do not use read actions for blocks that are not listed yet.",
 		"After project modifications, update at least one affected block.",
 	].join(" "),
@@ -69,7 +70,7 @@ export const blockTool: ChatToolDefinition<BlockToolInput> = {
 			},
 			context_filename: {
 				type: "string",
-				description: "Context markdown filename in .odex/context.",
+				description: "Context markdown filename inside the block's sibling context folder.",
 			},
 			context_title: {
 				type: "string",

@@ -223,6 +223,10 @@ function getBlocksDir(workspaceRoots: string[]): string {
 	return path.join(workspaceRoot, ".odex", "blocks");
 }
 
+function getBlockContextDir(blockDir: string): string {
+	return path.join(blockDir, "context");
+}
+
 async function readExistingContextFile(
 	filePath: string,
 	filename: string,
@@ -667,14 +671,18 @@ export function registerChatToolHandlers() {
 				throw new Error("Block writes require a definition.");
 			}
 
-			const contextDir = getContextDir(workspaceRoots);
+			const contextDir = getBlockContextDir(blockDir);
 			const nextContextFilename = typeof payload.contextFilename === "string" && payload.contextFilename.trim()
 				? normalizeContextFilename(payload.contextFilename)
 				: existing?.contextPath
 					? path.basename(existing.contextPath)
 					: `${blockId}.md`;
 			const nextContextPath = path.join(contextDir, nextContextFilename);
-			const existingContext = await readExistingContextFile(nextContextPath, nextContextFilename);
+			const existingContext =
+				(await readExistingContextFile(nextContextPath, nextContextFilename)) ??
+				(existing?.contextPath && existing.contextPath !== nextContextPath
+					? await readExistingContextFile(existing.contextPath, path.basename(existing.contextPath))
+					: null);
 			const contextParagraph =
 				typeof payload.contextParagraph === "string" ? payload.contextParagraph.trim() : "";
 			if (!contextParagraph) {

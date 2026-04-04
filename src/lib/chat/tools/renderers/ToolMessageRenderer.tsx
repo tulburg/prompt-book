@@ -28,6 +28,7 @@ import {
   Bot,
   CircleX,
 } from "lucide-react";
+import Bus from "@/lib/bus";
 
 /* ── Utility helpers ── */
 
@@ -502,12 +503,16 @@ function QuestionPreview({ display }: { display: ChatToolDisplayQuestion }) {
           {question.options && question.options.length > 0 ? (
             <div className="mt-2 space-y-1">
               {question.options.map((option) => (
-                <div
+                <button
+                  type="button"
                   key={option.id}
-                  className="rounded border border-border-500/50 bg-panel-700 px-2 py-1 text-[11px] text-foreground/80"
+                  className="w-full cursor-pointer rounded border border-border-500/50 bg-panel-700 px-2 py-1 text-left text-[11px] text-foreground/80 transition-colors hover:border-foreground/30 hover:bg-panel-600"
+                  onClick={() =>
+                    Bus.emit("chat:send-message", { text: option.label })
+                  }
                 >
                   {option.label}
-                </div>
+                </button>
               ))}
             </div>
           ) : (

@@ -719,6 +719,17 @@ export function ChatPanel({
     });
   };
 
+  React.useEffect(() => {
+    const handler = (data: { text: string }) => {
+      void chatService.sendMessage(data.text, {
+        mode: chatMode,
+        settings: effectiveSettings,
+      });
+    };
+    Bus.on("chat:send-message", handler);
+    return () => Bus.off("chat:send-message", handler);
+  }, [chatMode, effectiveSettings]);
+
   const handleStopGeneration = () => {
     chatService.stopGeneration();
   };

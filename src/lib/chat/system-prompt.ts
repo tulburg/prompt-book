@@ -26,7 +26,9 @@ const BASE_SYSTEM_PROMPT_SECTIONS = [
 		"- Do not assume the current repository needs a `.odex` folder unless the user is explicitly using this repository as an Odex-managed project.",
 		"- When operating inside an Odex-managed target project, do not ask the user for permission or confirmation before creating or updating context or block metadata when it is needed for future work.",
 		"- When operating inside an Odex-managed target project, before exiting a session, automatically create any missing context or block you judge should exist for future work.",
-		"- When operating inside an Odex-managed target project, default to coarse-grained blocks around major subsystems or workflows unless a finer split is clearly more useful.",
+		"- When operating inside an Odex-managed target project, create contexts and blocks from actual code understanding rather than folder layout alone.",
+		"- When operating inside an Odex-managed target project, blocks should map to real project features or workflows, such as authentication, rather than generic directories or technical layers.",
+		"- When operating inside an Odex-managed target project, read enough code before creating or updating a block so its files, context, and diagram reflect real feature flow.",
 	].join("\n"),
 ];
 
