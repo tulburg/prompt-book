@@ -1,4 +1,8 @@
 import type { ChatToolDefinition } from "@/lib/chat/tools/tool-types";
+import {
+	getPermittedBashCommands,
+	normalizePermittedBashCommand,
+} from "@/lib/application-settings";
 
 import { coerceNumber, coerceString, errorResult, textResult } from "./helpers";
 
@@ -236,6 +240,51 @@ function truncateOutput(output: string, maxChars: number): { text: string; wasTr
 	};
 }
 
+function isPermittedCommand(command: string, permittedCommands: string[]): boolean {
+	const normalized = normalizePermittedBashCommand(command);
+	return normalized.length > 0 && permittedCommands.includes(normalized);
+}
+
+function createPermissionRequest(
+	command: string,
+	description: string,
+): ReturnType<ChatToolDefinition["execute"]> extends Promise<infer T> ? T : never {
+	return {
+		content: [
+			"Permission required before running this bash command.",
+			`Command: ${command}`,
+			"Approve it to run this exact command and store it in settings for future runs.",
+		].join("\n"),
+		display: {
+			kind: "question",
+			title: "Approve Bash Command",
+			description:
+				description ||
+				"This bash command may modify files, git state, dependencies, or the local environment.",
+			helpText:
+				"Approve to run this exact command and add it to the permitted bash commands in settings.",
+			questions: [
+				{
+					id: "bash-command-approval",
+					prompt: "Allow this exact command?",
+					details: `$ ${command}`,
+					responseType: "single_select",
+					options: [
+						{ id: "approve", label: "Approve and run" },
+						{ id: "deny", label: "Don't run it" },
+					],
+				},
+			],
+		},
+		structuredContent: {
+			type: "bash_permission_request",
+			command,
+			description,
+		},
+		pauseAfter: true,
+	};
+}
+
 // ── Tool definition ────────────────────────────────────────────────────────
 
 export const bashTool: ChatToolDefinition = {
@@ -312,13 +361,20 @@ export const bashTool: ChatToolDefinition = {
 		const rawTimeout = coerceNumber(input.timeout, 30_000);
 		const timeoutMs = Math.min(Math.max(rawTimeout, 0), MAX_TIMEOUT_MS);
 		const runInBackground = input.run_in_background === true;
+		const description = coerceString(input.description);
+		const classification = classifyCommand(command);
+		const permittedCommands = getPermittedBashCommands(context.settings);
+
+		if (!classification.isReadOnly && !isPermittedCommand(command, permittedCommands)) {
+			return createPermissionRequest(command, description);
+		}
 
 		const result = await context.runCommand({
 			command,
 			cwd,
 			timeoutMs,
 			runInBackground,
-			description: coerceString(input.description),
+			description,
 		});
 
 		// Background tasks return immediately
@@ -341,7 +397,6 @@ export const bashTool: ChatToolDefinition = {
 			);
 		}
 
-		const classification = classifyCommand(command);
 		const interpretation = interpretExitCode(command, result.exitCode, result.stdout);
 
 		// Combine and truncate output
@@ -372,7 +427,7 @@ export const bashTool: ChatToolDefinition = {
 
 		return textResult(content, {
 			kind: "command",
-			title: coerceString(input.description) || "Shell command",
+			title: description || "Shell command",
 			command,
 			cwd: result.cwd,
 			stdout: result.stdout,

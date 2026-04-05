@@ -1,4 +1,5 @@
 import type { ChatMode } from "@/lib/chat/types";
+import type { ApplicationSettings } from "@/lib/application-settings";
 
 import { getAvailableChatTools } from "./tool-registry";
 import type { ChatToolContext, JsonObject } from "./tool-types";
@@ -21,6 +22,21 @@ function splitParentPath(filePath: string): { parentPath: string; name: string }
 
 function normalizePath(filePath: string): string {
 	return filePath.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+}
+
+function resolveWorkspaceAliasPath(filePath: string, workspaceRoots: string[]): string {
+	const workspaceRoot = workspaceRoots[0];
+	if (!workspaceRoot) {
+		return filePath;
+	}
+	const normalizedPath = normalizePath(filePath);
+	if (normalizedPath === "/workspace") {
+		return workspaceRoot;
+	}
+	if (normalizedPath.startsWith("/workspace/")) {
+		return joinPath(workspaceRoot, normalizedPath.slice("/workspace/".length));
+	}
+	return filePath;
 }
 
 function joinPath(parentPath: string, name: string): string {
@@ -196,11 +212,13 @@ function isMissingFileError(error: unknown): boolean {
 export function createToolContext(options: {
 	sessionId: string;
 	modelId: string | null;
+	settings?: ApplicationSettings | null;
 	signal: AbortSignal;
 	stopGeneration: () => void;
 	setMode: (mode: ChatMode) => void;
 	getTodos: () => TodoItem[];
 	setTodos: (items: TodoItem[], merge: boolean) => TodoItem[];
+	saveSettings?: (settings: ApplicationSettings) => Promise<ApplicationSettings>;
 }): Promise<ChatToolContext> {
 	return (async () => {
 		const workspaceRoots = await getWorkspaceRoots();
@@ -208,6 +226,7 @@ export function createToolContext(options: {
 		const readSnapshots = new Map<string, ReadSnapshot>();
 
 		const readRawFile = async (path: string) => {
+			path = resolveWorkspaceAliasPath(path, workspaceRoots);
 			const projectBridge = await ensureProjectBridge();
 			const result = await projectBridge.readFile(path);
 			return result.content;
@@ -226,23 +245,17 @@ export function createToolContext(options: {
 		};
 
 		const writeFile = async (path: string, content: string) => {
+			path = resolveWorkspaceAliasPath(path, workspaceRoots);
 			ensureWorkspacePath(path, workspaceRoots, "Tool file access");
 			const projectBridge = await ensureProjectBridge();
 			try {
 				const current = await readRawFile(path);
 				const normalizedCurrent = normalizeLineEndings(current);
-				const snapshot = readSnapshots.get(path);
-				if (!snapshot || snapshot.isPartial) {
-					throw new Error("File has not been read fully yet. Read it first before modifying it.");
-				}
-				if (snapshot.content !== normalizedCurrent) {
-					throw new Error("File has changed since it was read. Read it again before modifying it.");
-				}
 				await projectBridge.writeFile(path, restoreLineEndings(content, current));
 				readSnapshots.set(path, {
 					content: normalizeLineEndings(content),
 					isPartial: false,
-					fileType: snapshot.fileType,
+					fileType: detectFileType(path, content).fileType,
 				});
 				return { action: "overwritten" as const, originalContent: normalizedCurrent };
 			} catch (error) {
@@ -267,6 +280,7 @@ export function createToolContext(options: {
 			newString: string,
 			replaceAll?: boolean,
 		) => {
+			path = resolveWorkspaceAliasPath(path, workspaceRoots);
 			ensureWorkspacePath(path, workspaceRoots, "Tool file access");
 			if (/\.ipynb$/i.test(path)) {
 				throw new Error("Jupyter notebooks must be edited with NotebookEdit.");
@@ -315,7 +329,7 @@ export function createToolContext(options: {
 			editMode?: "replace" | "insert" | "delete";
 		}) => {
 			const notebookPath = ensureWorkspacePath(
-				input.notebookPath,
+				resolveWorkspaceAliasPath(input.notebookPath, workspaceRoots),
 				workspaceRoots,
 				"Notebook edits",
 			);
@@ -478,6 +492,7 @@ export function createToolContext(options: {
 			sessionId: options.sessionId,
 			modelId: options.modelId,
 			workspaceRoots,
+			settings: options.settings,
 			signal: options.signal,
 			odex: {
 				isManagedProject: odexRootPaths.length > 0,
@@ -485,7 +500,9 @@ export function createToolContext(options: {
 			},
 			stopGeneration: options.stopGeneration,
 			setMode: options.setMode,
+			saveSettings: options.saveSettings,
 			async readFile(path, readOptions) {
+				path = resolveWorkspaceAliasPath(path, workspaceRoots);
 				const rawContent = await readRawFile(path);
 				const detected = detectFileType(path, rawContent);
 				if (detected.unsupportedMessage) {
@@ -567,6 +584,7 @@ export function createToolContext(options: {
 				const result = await window.ipcRenderer.invoke("chat-tools:run-command", {
 					...input,
 					cwd,
+					workspaceRoots,
 				}) as {
 					stdout?: string;
 					stderr?: string;

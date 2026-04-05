@@ -152,6 +152,33 @@ describe("request builder", () => {
 		});
 	});
 
+	it("includes the restored workspace root in runtime context", () => {
+		const session: ChatSessionState = {
+			id: "session-workspace-root",
+			title: "New Chat",
+			mode: "Agent",
+			modelId: "local-model",
+			createdAt: Date.now(),
+			bootstrappedAt: Date.now(),
+			closedAt: null,
+			transcript: [],
+		};
+
+		const request = buildAnthropicRequest({
+			session,
+			queryContext: buildQueryContext({
+				session,
+				platform: "test-platform",
+				now: new Date("2026-04-02T12:00:00.000Z"),
+				workspaceRoots: ["/Users/demo/project"],
+			}),
+			model: "local-model",
+			provider: "llama",
+		});
+
+		expect(request.system.join("\n")).toContain("workspaceRoot: /Users/demo/project");
+	});
+
 	it("serializes qwen tool turns without assistant echo text", () => {
 		const session: ChatSessionState = {
 			id: "session-qwen-tools",

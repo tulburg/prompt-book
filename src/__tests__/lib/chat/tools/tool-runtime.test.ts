@@ -12,10 +12,10 @@ import { createToolContext } from "@/lib/chat/tools/tool-runtime";
 
 type FileMap = Map<string, string>;
 
-function createProjectBridge(files: FileMap) {
+function createProjectBridge(files: FileMap, rootPath = "/workspace") {
 	return {
 		restoreLastProject: vi.fn(async () => ({
-			roots: [{ path: "/workspace" }],
+			roots: [{ path: rootPath }],
 		})),
 		listDirectory: vi.fn(async (directoryPath: string) => {
 			const normalizedPath = directoryPath.replace(/\/+$/, "") || "/";
@@ -41,7 +41,7 @@ function createProjectBridge(files: FileMap) {
 					name,
 					kind: "directory" as const,
 					parentPath: normalizedPath,
-					rootPath: "/workspace",
+					rootPath,
 					permissions: { read: true, write: true, status: "granted" as const },
 				})),
 				permissions: { read: true, write: true, status: "granted" as const },
@@ -74,10 +74,10 @@ function createProjectBridge(files: FileMap) {
 	};
 }
 
-function installWindowStubs(files: FileMap) {
+function installWindowStubs(files: FileMap, rootPath = "/workspace") {
 	Object.defineProperty(window, "projectBridge", {
 		configurable: true,
-		value: createProjectBridge(files),
+		value: createProjectBridge(files, rootPath),
 	});
 	Object.defineProperty(window, "ipcRenderer", {
 		configurable: true,
@@ -253,8 +253,8 @@ function installWindowStubs(files: FileMap) {
 	});
 }
 
-async function makeContext(files: FileMap) {
-	installWindowStubs(files);
+async function makeContext(files: FileMap, rootPath = "/workspace") {
+	installWindowStubs(files, rootPath);
 	return createToolContext({
 		sessionId: "session-1",
 		modelId: "model-1",
@@ -281,16 +281,27 @@ describe("tool runtime", () => {
 		expect(result.filePath).toBe("/external/file.txt");
 	});
 
-	it("rejects overwriting a file that changed after it was read", async () => {
+	it("maps Claude-style /workspace paths to the restored project root", async () => {
+		const files = new Map<string, string>([
+			["/Users/demo/project/frontend/src/consumer/pages/login-page.tsx", "export const LoginPage = () => null;\n"],
+		]);
+		const context = await makeContext(files, "/Users/demo/project");
+
+		const result = await context.readFile("/workspace/frontend/src/consumer/pages/login-page.tsx");
+
+		expect(result.filePath).toBe("/Users/demo/project/frontend/src/consumer/pages/login-page.tsx");
+		expect(result.content).toContain("LoginPage");
+	});
+
+	it("allows overwriting an existing file without a prior full read", async () => {
 		const files = new Map<string, string>([["/workspace/file.txt", "original"]]);
 		const context = await makeContext(files);
 
-		await context.readFile("/workspace/file.txt");
-		files.set("/workspace/file.txt", "changed elsewhere");
+		const result = await context.writeFile("/workspace/file.txt", "replacement");
 
-		await expect(context.writeFile("/workspace/file.txt", "replacement")).rejects.toThrow(
-			"File has changed since it was read.",
-		);
+		expect(result.action).toBe("overwritten");
+		expect(result.originalContent).toBe("original");
+		expect(files.get("/workspace/file.txt")).toBe("replacement");
 	});
 
 	it("rejects editing after a partial read", async () => {
@@ -316,6 +327,26 @@ describe("tool runtime", () => {
 		});
 
 		expect(result.cwd).toBe("/workspace");
+	});
+
+	it("forwards workspace roots when running shell commands with a relative cwd", async () => {
+		const files = new Map<string, string>();
+		const context = await makeContext(files);
+
+		await context.runCommand({
+			command: "ls",
+			cwd: "src",
+			description: "List source files",
+		});
+
+		const invokeMock = window.ipcRenderer.invoke as ReturnType<typeof vi.fn>;
+		expect(invokeMock).toHaveBeenCalledWith(
+			"chat-tools:run-command",
+			expect.objectContaining({
+				cwd: "src",
+				workspaceRoots: ["/workspace"],
+			}),
+		);
 	});
 
 	it("returns a friendly error when a block does not exist", async () => {

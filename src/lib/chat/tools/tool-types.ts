@@ -1,3 +1,5 @@
+import type { ApplicationSettings } from "@/lib/application-settings";
+
 export type JsonPrimitive = string | number | boolean | null;
 
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -179,6 +181,7 @@ export interface ChatToolContext {
 	sessionId: string;
 	modelId: string | null;
 	workspaceRoots: string[];
+	settings?: ApplicationSettings | null;
 	signal: AbortSignal;
 	odex?: {
 		isManagedProject: boolean;
@@ -186,6 +189,7 @@ export interface ChatToolContext {
 	};
 	stopGeneration: () => void;
 	setMode: (mode: "Agent" | "Ask" | "Edit") => void;
+	saveSettings?: (settings: ApplicationSettings) => Promise<ApplicationSettings>;
 	readFile: (
 		path: string,
 		options?: { offset?: number; limit?: number },

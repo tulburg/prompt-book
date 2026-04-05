@@ -1,6 +1,8 @@
 import type { SidebarSortOrder } from "./sidebar-tree";
 
 export const SETTINGS_EDITOR_PATH = "prompt-book-settings:/application";
+export const BASH_PERMITTED_COMMANDS_SETTING =
+	"chat.tools.bash.permittedCommands";
 
 export interface ApplicationSettings {
 	"workbench.sidebar.visible": boolean;
@@ -11,6 +13,7 @@ export interface ApplicationSettings {
 	"chat.providers.google.apiKey": string;
 	"chat.providers.anthropic.apiKey": string;
 	"chat.providers.openai.apiKey": string;
+	[BASH_PERMITTED_COMMANDS_SETTING]: string[];
 }
 
 export type ApplicationSettingKey = keyof ApplicationSettings;
@@ -83,6 +86,7 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
 	"chat.providers.google.apiKey": "",
 	"chat.providers.anthropic.apiKey": "",
 	"chat.providers.openai.apiKey": "",
+	[BASH_PERMITTED_COMMANDS_SETTING]: [],
 };
 
 export const APPLICATION_SETTINGS_GROUPS: ApplicationSettingsGroup[] = [
@@ -296,5 +300,39 @@ export function sanitizeApplicationSettings(
 			candidate["chat.providers.openai.apiKey"];
 	}
 
+	if (Array.isArray(candidate[BASH_PERMITTED_COMMANDS_SETTING])) {
+		nextSettings[BASH_PERMITTED_COMMANDS_SETTING] = candidate[
+			BASH_PERMITTED_COMMANDS_SETTING
+		].filter((value): value is string => typeof value === "string");
+	}
+
 	return nextSettings;
+}
+
+export function normalizePermittedBashCommand(command: string): string {
+	return command.trim();
+}
+
+export function getPermittedBashCommands(
+	settings: ApplicationSettings | null | undefined,
+): string[] {
+	return settings?.[BASH_PERMITTED_COMMANDS_SETTING] ?? [];
+}
+
+export function addPermittedBashCommand(
+	settings: ApplicationSettings,
+	command: string,
+): ApplicationSettings {
+	const normalized = normalizePermittedBashCommand(command);
+	if (!normalized) {
+		return settings;
+	}
+	const current = getPermittedBashCommands(settings);
+	if (current.includes(normalized)) {
+		return settings;
+	}
+	return {
+		...settings,
+		[BASH_PERMITTED_COMMANDS_SETTING]: [...current, normalized],
+	};
 }

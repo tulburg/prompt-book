@@ -16,6 +16,8 @@ import { parseAssistantRenderableContent } from "@/lib/chat/render-message-conte
 import { handleChatStreamEvent } from "@/lib/chat/stream-events";
 import {
   ErrorTimelineRow,
+  getQuestionToolDisplay,
+  QuestionSurfaceCard,
   ToolMessageRenderer,
   ThinkingTimelineRow,
   WorkingTimelineRow,
@@ -1801,8 +1803,17 @@ function ChatMessageItem({
     message.role === "system" || message.subtype === "interruption";
   const isToolMessage =
     message.subtype === "tool_use" || message.subtype === "tool_result";
+  const questionDisplay = getQuestionToolDisplay(message, pairedResult);
   const isAssistantText =
     !isUser && !isToolMessage && !isNotice && !isErrorMessage;
+
+  if (questionDisplay) {
+    return (
+      <div className="px-4 py-2">
+        <QuestionSurfaceCard display={questionDisplay} />
+      </div>
+    );
+  }
 
   return (
     <div

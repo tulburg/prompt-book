@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_APPLICATION_SETTINGS } from "@/lib/application-settings";
+import {
+	BASH_PERMITTED_COMMANDS_SETTING,
+	DEFAULT_APPLICATION_SETTINGS,
+} from "@/lib/application-settings";
 import { ChatService } from "@/lib/chat-service";
 
 function installOdexToolStubs() {
@@ -509,6 +512,171 @@ describe("chat service", () => {
 		expect(toolResult?.toolResult?.toolName).toBe("AskUserQuestion");
 		expect(toolResult?.toolResult?.display?.kind).toBe("question");
 		expect(messages.at(-1)?.subtype).toBe("tool_result");
+	});
+
+	it("persists approved bash commands and allows the retried command", async () => {
+		const runCommandMock = vi.fn(async () => ({
+			stdout: "installed",
+			stderr: "",
+			exitCode: 0,
+			cwd: "/workspace",
+			status: "completed" as const,
+		}));
+		const saveSettingsMock = vi.fn(async (settings) => settings);
+
+		Object.defineProperty(window, "projectBridge", {
+			configurable: true,
+			value: {
+				restoreLastProject: vi.fn(async () => ({
+					roots: [{ path: "/workspace" }],
+				})),
+				listDirectory: vi.fn(async (directoryPath: string) => {
+					throw new Error(
+						`ENOENT: no such file or directory, scandir '${directoryPath}'`,
+					);
+				}),
+			},
+		});
+		Object.defineProperty(window, "settingsBridge", {
+			configurable: true,
+			value: {
+				load: vi.fn(async () => DEFAULT_APPLICATION_SETTINGS),
+				save: saveSettingsMock,
+			},
+		});
+		Object.defineProperty(window, "ipcRenderer", {
+			configurable: true,
+			value: {
+				invoke: vi.fn(async (channel: string, payload?: Record<string, unknown>) => {
+					if (channel === "chat-tools:run-command") {
+						return runCommandMock(payload);
+					}
+					if (channel === "chat-tools:glob") {
+						return { items: [], truncated: false };
+					}
+					if (channel === "chat-tools:grep") {
+						return {
+							mode: "files_with_matches",
+							output: "",
+							files: [],
+							truncated: false,
+							counts: [],
+						};
+					}
+					if (channel === "chat-tools:stop-task") {
+						return { taskId: payload?.taskId, command: "npm install" };
+					}
+					throw new Error(`Unexpected IPC channel: ${channel}`);
+				}),
+			},
+		});
+
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: "",
+									tool_calls: [
+										{
+											id: "call_bash_pending",
+											function: {
+												name: "Bash",
+												arguments: JSON.stringify({
+													command: "npm install",
+													description: "Install dependencies",
+												}),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [
+							{
+								message: {
+									content: "",
+									tool_calls: [
+										{
+											id: "call_bash_retry",
+											function: {
+												name: "Bash",
+												arguments: JSON.stringify({
+													command: "npm install",
+													description: "Install dependencies",
+												}),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "Dependencies installed." } }],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = new ChatService();
+		service.currentModel = {
+			id: "openai/gpt-oss-20b",
+			displayName: "GPT OSS 20B",
+			provider: "llama",
+		};
+		service.createSession("Bash Approval");
+
+		await service.sendMessage("Install the dependencies", {
+			settings: DEFAULT_APPLICATION_SETTINGS,
+		});
+
+		expect(runCommandMock).not.toHaveBeenCalled();
+		expect(saveSettingsMock).not.toHaveBeenCalled();
+
+		await service.sendMessage("Approve and run", {
+			settings: DEFAULT_APPLICATION_SETTINGS,
+		});
+
+		expect(saveSettingsMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				[BASH_PERMITTED_COMMANDS_SETTING]: ["npm install"],
+			}),
+		);
+		expect(runCommandMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				command: "npm install",
+				description: "Install dependencies",
+			}),
+		);
+		expect(service.activeSession?.messages.at(-1)?.content).toBe(
+			"Dependencies installed.",
+		);
 	});
 
 	it("strips echoed tool invocation text from assistant messages", async () => {

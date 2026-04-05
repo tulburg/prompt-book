@@ -484,6 +484,195 @@ function summarizeTodoDisplay(
   return `${display.items.length} task${display.items.length === 1 ? "" : "s"}`;
 }
 
+type QuestionAnswers = Record<string, string | string[]>;
+
+function isQuestionAnswered(value: string | string[] | undefined): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function formatQuestionAnswer(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "string") return value.trim();
+  return "";
+}
+
+function buildQuestionReply(
+  display: ChatToolDisplayQuestion,
+  answers: QuestionAnswers,
+): string {
+  const answeredQuestions = display.questions
+    .map((question, index) => {
+      const answer = formatQuestionAnswer(answers[question.id]);
+      if (!answer) return null;
+      if (display.questions.length === 1) return answer;
+      return `${index + 1}. ${question.prompt}: ${answer}`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return answeredQuestions.join("\n");
+}
+
+export function getQuestionToolDisplay(
+  message: ChatMessage,
+  pairedResult?: ChatMessage,
+): ChatToolDisplayQuestion | null {
+  if (
+    message.subtype === "tool_use" &&
+    message.toolInvocation?.toolName === "AskUserQuestion" &&
+    pairedResult?.toolResult?.display?.kind === "question"
+  ) {
+    return pairedResult.toolResult.display;
+  }
+
+  if (
+    message.subtype === "tool_result" &&
+    message.toolResult?.toolName === "AskUserQuestion" &&
+    message.toolResult.display?.kind === "question"
+  ) {
+    return message.toolResult.display;
+  }
+
+  return null;
+}
+
+export function QuestionSurfaceCard({
+  display,
+}: {
+  display: ChatToolDisplayQuestion;
+}) {
+  const [answers, setAnswers] = React.useState<QuestionAnswers>({});
+  const submitLabel = display.submitLabel?.trim() || "Submit answer";
+  const allAnswered =
+    display.questions.length > 0 &&
+    display.questions.every((question) =>
+      isQuestionAnswered(answers[question.id]),
+    );
+
+  const handleSubmit = React.useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const text = buildQuestionReply(display, answers);
+      if (!text) return;
+      Bus.emit("chat:send-message", { text });
+    },
+    [answers, display],
+  );
+
+  return (
+    <form
+      className="rounded-2xl border border-border-500 bg-panel-600 shadow-[0_8px_28px_rgba(0,0,0,0.16)]"
+      onSubmit={handleSubmit}
+    >
+      <div className="border-b border-border-500 px-4 py-3">
+        <div className="flex items-center gap-2 text-[12px] font-medium text-foreground/80">
+          <Sparkles className="size-4 text-foreground/55" />
+          <span>{display.title?.trim() || "Asked a question"}</span>
+        </div>
+        {display.description && (
+          <div className="mt-1 text-[12px] text-foreground/65">
+            {display.description}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3 px-4 py-4">
+        {display.questions.map((question, index) => {
+          const value = answers[question.id];
+          const selectedValues = Array.isArray(value) ? value : [];
+          const singleValue = typeof value === "string" ? value : "";
+          return (
+            <div
+              key={question.id}
+              className="rounded-xl border border-border-600/70 bg-panel-400/60 px-3 py-3"
+            >
+              <div className="text-[13px] font-medium text-foreground">
+                {display.questions.length > 1 ? `${index + 1}. ` : ""}
+                {question.prompt}
+              </div>
+              {question.details && (
+                <div className="mt-1 text-[11px] text-foreground/60">
+                  {question.details}
+                </div>
+              )}
+
+              {question.options && question.options.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {question.options.map((option) => {
+                    const isSelected =
+                      question.responseType === "multi_select"
+                        ? selectedValues.includes(option.label)
+                        : singleValue === option.label;
+                    return (
+                      <button
+                        type="button"
+                        key={option.id}
+                        className={`cursor-pointer rounded-lg border px-3 py-1.5 text-left text-[12px] transition-colors ${
+                          isSelected
+                            ? "border-sky/70 bg-sky/15 text-foreground"
+                            : "border-border-500/60 bg-panel-700 text-foreground/80 hover:border-foreground/25 hover:bg-panel-600"
+                        }`}
+                        aria-pressed={isSelected}
+                        onClick={() => {
+                          setAnswers((current) => {
+                            const next = { ...current };
+                            if (question.responseType === "multi_select") {
+                              const existing = Array.isArray(next[question.id])
+                                ? (next[question.id] as string[])
+                                : [];
+                              next[question.id] = existing.includes(
+                                option.label,
+                              )
+                                ? existing.filter(
+                                    (item) => item !== option.label,
+                                  )
+                                : [...existing, option.label];
+                            } else {
+                              next[question.id] = option.label;
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <textarea
+                  className="mt-3 min-h-[88px] w-full resize-y rounded-xl border border-border-500/70 bg-panel-700 px-3 py-2 text-[12px] text-foreground outline-none transition-colors placeholder:text-placeholder focus:border-sky/60"
+                  value={singleValue}
+                  onChange={(event) =>
+                    setAnswers((current) => ({
+                      ...current,
+                      [question.id]: event.target.value,
+                    }))
+                  }
+                  placeholder="Type your answer"
+                />
+              )}
+            </div>
+          );
+        })}
+
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[11px] text-placeholder">
+            {display.helpText || "Submit to continue the conversation."}
+          </div>
+          <button
+            type="submit"
+            className="cursor-pointer rounded-lg bg-sky px-3 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!allAnswered}
+          >
+            {submitLabel}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 function QuestionPreview({ display }: { display: ChatToolDisplayQuestion }) {
   return (
     <div className="space-y-3 px-3 py-2">
@@ -774,7 +963,9 @@ function buildToolAction(
             hasExternalToggle
             peekMaxHeight={120}
           >
-            {(maxH) => <MonacoCodeView value={display.output!} maxHeight={maxH} />}
+            {(maxH) => (
+              <MonacoCodeView value={display.output!} maxHeight={maxH} />
+            )}
           </PreviewBox>
         );
       }
@@ -981,6 +1172,31 @@ function buildToolAction(
 
     case "Bash":
     case "Shell": {
+      if (display?.kind === "question") {
+        const label = isRunning ? (
+          <span className="tool-title-shimmer">Checking command permissions</span>
+        ) : (
+          <span>Awaiting bash approval</span>
+        );
+        const preview = (
+          <PreviewBox
+            stateKey={stateKey}
+            initialState="expanded"
+            hasExternalToggle
+            peekMaxHeight={220}
+            expandedMaxHeight={420}
+          >
+            {() => <QuestionPreview display={display} />}
+          </PreviewBox>
+        );
+        return {
+          icon: isRunning ? <SpinnerIcon /> : getToolIcon("Shell"),
+          label,
+          preview,
+          previewStateKey: stateKey,
+        };
+      }
+
       const cmdDisplay = display?.kind === "command" ? display : undefined;
       const command = cmdDisplay?.command || (input.command as string) || "";
       const description = (input.description as string) || "";
@@ -1289,7 +1505,7 @@ function buildToolAction(
               }
               return getBlockActionSummary(input) ?? "Block";
             })()
-          : getBlockActionSummary(input) ?? "Block";
+          : (getBlockActionSummary(input) ?? "Block");
       const label = isRunning ? (
         <span className="tool-title-shimmer">{summary}</span>
       ) : (

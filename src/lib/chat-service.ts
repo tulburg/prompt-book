@@ -21,6 +21,11 @@ import type {
 } from "./chat/types";
 import type { ApplicationSettings } from "./application-settings";
 import {
+	DEFAULT_APPLICATION_SETTINGS,
+	addPermittedBashCommand,
+} from "./application-settings";
+import { createBrowserSettingsBridge } from "./browser-settings-bridge";
+import {
 	type LlamaInstalledModelInfo,
 	llamaServerService,
 } from "./server-service";
@@ -97,6 +102,126 @@ function getToolEchoField(input: JsonObject, key: string): string | null {
 	return typeof value === "string" && value.trim().length > 0
 		? value.trim()
 		: null;
+}
+
+function getSettingsBridge() {
+	if (typeof window === "undefined") {
+		return undefined;
+	}
+	return window.settingsBridge ?? createBrowserSettingsBridge();
+}
+
+function isApprovalResponse(content: string): boolean {
+	const normalized = content.trim().toLowerCase();
+	return [
+		"approve",
+		"approved",
+		"approve and run",
+		"yes",
+		"yes, run it",
+		"run it",
+		"allow",
+		"allow and run",
+		"proceed",
+	].includes(normalized);
+}
+
+function isDenialResponse(content: string): boolean {
+	const normalized = content.trim().toLowerCase();
+	return [
+		"deny",
+		"don't run it",
+		"do not run it",
+		"cancel",
+		"reject",
+		"no",
+		"no, don't run it",
+	].includes(normalized);
+}
+
+function getPendingBashPermissionRequest(session: ChatSession): {
+	command: string;
+	description?: string;
+} | null {
+	const visibleEntries = session.transcript.filter(
+		(entry) => entry.visibility === "visible",
+	);
+	const latestUserEntry = visibleEntries.at(-1);
+	const latestToolEntry = visibleEntries.at(-2);
+	if (latestUserEntry?.role !== "user" || latestUserEntry.subtype !== "message") {
+		return null;
+	}
+	if (
+		latestToolEntry?.subtype !== "tool_result" ||
+		latestToolEntry.toolResult?.toolName !== "Bash"
+	) {
+		return null;
+	}
+	const structured = latestToolEntry.toolResult.structuredContent;
+	if (
+		!structured ||
+		structured.type !== "bash_permission_request" ||
+		typeof structured.command !== "string"
+	) {
+		return null;
+	}
+	return {
+		command: structured.command,
+		description:
+			typeof structured.description === "string"
+				? structured.description
+				: undefined,
+	};
+}
+
+async function persistApprovedBashCommand(
+	command: string,
+	settings?: ApplicationSettings | null,
+): Promise<ApplicationSettings> {
+	const settingsBridge = getSettingsBridge();
+	const currentSettings =
+		settings ??
+		(settingsBridge ? await settingsBridge.load() : DEFAULT_APPLICATION_SETTINGS);
+	const nextSettings = addPermittedBashCommand(currentSettings, command);
+	if (!settingsBridge) {
+		return nextSettings;
+	}
+	return settingsBridge.save(nextSettings);
+}
+
+async function resolveRuntimeSettings(
+	session: ChatSession,
+	userContent: string,
+	settings?: ApplicationSettings | null,
+): Promise<{
+	settings?: ApplicationSettings | null;
+	runtimeReminder?: string;
+}> {
+	const pendingRequest = getPendingBashPermissionRequest(session);
+	if (!pendingRequest) {
+		return { settings };
+	}
+	if (isApprovalResponse(userContent)) {
+		const nextSettings = await persistApprovedBashCommand(
+			pendingRequest.command,
+			settings,
+		);
+		return {
+			settings: nextSettings,
+			runtimeReminder: [
+				`The user approved this exact Bash command: \`${pendingRequest.command}\`.`,
+				"It has been added to permitted bash commands in settings.",
+				"Retry the command now if it is still needed to complete the task.",
+			].join(" "),
+		};
+	}
+	if (isDenialResponse(userContent)) {
+		return {
+			settings,
+			runtimeReminder: `The user denied this Bash command: \`${pendingRequest.command}\`. Do not run it unless they explicitly approve it later.`,
+		};
+	}
+	return { settings };
 }
 
 type OdexEnforcementState = {
@@ -395,6 +520,12 @@ export class ChatService {
 			subtype: "message",
 		});
 		session = this.commitEntry(session.id, userMessage) ?? session;
+		const runtimeSettings = await resolveRuntimeSettings(
+			session,
+			content,
+			options?.settings,
+		);
+		const effectiveSettings = runtimeSettings.settings ?? options?.settings;
 
 		if (this._stopRequested) {
 			this._stopRequested = false;
@@ -426,7 +557,6 @@ export class ChatService {
 
 		const MAX_TOOL_ITERATIONS = 30;
 		const MAX_STREAM_RETRIES = 2;
-		const MAX_ODEX_ENFORCEMENT_RETRIES = 3;
 		let odexEnforcement: OdexEnforcementState | null = null;
 		try {
 			if (abortController.signal.aborted) {
@@ -450,18 +580,31 @@ export class ChatService {
 						? await createToolContext({
 								sessionId: session.id,
 								modelId: resolvedModel,
+								settings: effectiveSettings,
 								signal: abortController.signal,
 								stopGeneration: () => this.stopGeneration(),
 								setMode: (mode) => this.setMode(mode),
 								getTodos: () => this.store.getSessionTodos(session.id),
 								setTodos: (items, merge) =>
 									this.updateSessionTodos(session.id, items, merge),
+								saveSettings: (nextSettings) => {
+									const settingsBridge = getSettingsBridge();
+									return settingsBridge
+										? settingsBridge.save(nextSettings)
+										: Promise.resolve(nextSettings);
+								},
 							})
 						: undefined;
 				odexEnforcement ??= createOdexEnforcementState(toolContext);
 				const queryContext = buildQueryContext({
 					session,
-					appendSystemPrompt: buildOdexEnforcementPrompt(odexEnforcement),
+					appendSystemPrompt: [
+						runtimeSettings.runtimeReminder,
+						buildOdexEnforcementPrompt(odexEnforcement),
+					]
+						.filter(Boolean)
+						.join("\n\n"),
+					workspaceRoots: toolContext?.workspaceRoots,
 				});
 				const request = buildAnthropicRequest({
 					session,
@@ -485,7 +628,7 @@ export class ChatService {
 						for await (const event of this.streamModelResponse(request, {
 							serverUrl: options?.serverUrl,
 							signal: abortController.signal,
-							settings: options?.settings,
+							settings: effectiveSettings,
 						})) {
 							if (event.type === "content_delta") {
 								assistantContent += event.text;
@@ -532,28 +675,11 @@ export class ChatService {
 				);
 				if (assistantToolCalls.length === 0) {
 					if (!isOdexEnforcementSatisfied(odexEnforcement)) {
-						if (
-							(odexEnforcement?.retryCount ?? 0) >=
-							MAX_ODEX_ENFORCEMENT_RETRIES
-						) {
-							this.commitEntry(
-								session.id,
-								createTranscriptEntry({
-									role: "assistant",
-									content:
-										"Odex enforcement could not complete because the required context/block metadata was not updated after multiple attempts.",
-									visibility: "visible",
-									includeInHistory: false,
-									subtype: "error",
-								}),
-							);
-							break;
-						}
 						if (odexEnforcement) {
 							odexEnforcement.retryCount += 1;
 						}
 						console.warn(
-							`[ChatService] Odex enforcement retry ${odexEnforcement?.retryCount ?? 0}/${MAX_ODEX_ENFORCEMENT_RETRIES} for session=${session.id}`,
+							`[ChatService] Odex enforcement retry ${odexEnforcement?.retryCount ?? 0} for session=${session.id}`,
 						);
 						continue;
 					}

@@ -142,12 +142,36 @@ function normalizeGlobPattern(pattern: string): string {
 	return isNegated ? `!${normalized}` : normalized;
 }
 
-function resolveSearchPath(requestedPath: string | undefined, workspaceRoots: string[]): string {
-	const base = requestedPath || workspaceRoots[0];
-	if (!base) {
+function resolveWorkspacePath(
+	requestedPath: string | undefined,
+	workspaceRoots: string[],
+	options?: { requireWorkspaceRoot?: boolean },
+): string {
+	const workspaceRoot = workspaceRoots[0];
+	const trimmedPath = requestedPath?.trim();
+
+	if (trimmedPath) {
+		if (workspaceRoot && (trimmedPath === "/workspace" || trimmedPath.startsWith("/workspace/"))) {
+			const relativePath = trimmedPath === "/workspace" ? "" : trimmedPath.slice("/workspace/".length);
+			return path.resolve(workspaceRoot, relativePath);
+		}
+		if (path.isAbsolute(trimmedPath)) {
+			return path.resolve(trimmedPath);
+		}
+		if (workspaceRoot) {
+			return path.resolve(workspaceRoot, trimmedPath);
+		}
+		return path.resolve(trimmedPath);
+	}
+
+	if (!workspaceRoot && options?.requireWorkspaceRoot !== false) {
 		throw new Error("No workspace is open. Open a project before searching.");
 	}
-	return path.resolve(base);
+	return workspaceRoot ? path.resolve(workspaceRoot) : "";
+}
+
+function resolveSearchPath(requestedPath: string | undefined, workspaceRoots: string[]): string {
+	return resolveWorkspacePath(requestedPath, workspaceRoots);
 }
 
 function isRipgrepNoMatchError(error: unknown): boolean {
@@ -660,7 +684,10 @@ export function registerChatToolHandlers() {
 				? payload.definition.trim()
 				: existing?.definition ?? "";
 			const nextFiles = Array.isArray(payload.files)
-				? [...new Set(payload.files.filter((value): value is string => typeof value === "string").map((value) => path.resolve(value.trim())).filter(Boolean))].sort((left, right) =>
+				? [...new Set(payload.files
+						.filter((value): value is string => typeof value === "string")
+						.map((value) => resolveWorkspacePath(value, workspaceRoots, { requireWorkspaceRoot: false }))
+						.filter(Boolean))].sort((left, right) =>
 						left.localeCompare(right),
 					)
 				: existing?.files ?? [];
@@ -738,12 +765,16 @@ export function registerChatToolHandlers() {
 				timeoutMs?: number;
 				runInBackground?: boolean;
 				description?: string;
+				workspaceRoots?: string[];
 			},
 		) => {
 			if (!payload.cwd) {
 				throw new Error("No working directory specified and no workspace is open.");
 			}
-			const cwd = payload.cwd;
+			const workspaceRoots = Array.isArray(payload.workspaceRoots)
+				? payload.workspaceRoots.filter((value): value is string => typeof value === "string")
+				: [];
+			const cwd = resolveWorkspacePath(payload.cwd, workspaceRoots, { requireWorkspaceRoot: false }) || payload.cwd;
 			if (payload.runInBackground) {
 				const taskId = createTaskId();
 				const outputPath = path.join(getBackgroundTaskDir(), `${taskId}.log`);
